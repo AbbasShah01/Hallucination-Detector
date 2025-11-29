@@ -37,9 +37,14 @@ The system processes LLM responses and outputs a hallucination probability score
 
 ### High-Level Architecture
 
+The system supports two detection modes:
+
+#### Mode 1: Response-Level Detection (Default)
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │              Hybrid Hallucination Detection System              │
+│                    (Response-Level Mode)                        │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -86,6 +91,83 @@ The system processes LLM responses and outputs a hallucination probability score
               │  + Confidence        │
               └───────────────────────┘
 ```
+
+#### Mode 2: Sentence-Level (Span-Level) Detection
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Hybrid Hallucination Detection System              │
+│                   (Sentence-Level Mode)                          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+        ┌─────────────────────────────────────────┐
+        │      Input: LLM Response Text          │
+        └─────────────────────────────────────────┘
+                              │
+                              ▼
+              ┌──────────────────────────┐
+              │  Sentence Splitter       │
+              │  (NLTK/spaCy/regex)     │
+              └──────────────────────────┘
+                              │
+                              ▼
+                    [Split into sentences]
+                              │
+        ┌─────────────────────┴─────────────────────┐
+        │                                           │
+        ▼                                           ▼
+┌──────────────────┐                    ┌──────────────────────┐
+│  Span Classifier │                    │  Span Entity        │
+│  (Per-sentence   │                    │  Verifier           │
+│   Transformer)   │                    │  (Per-sentence NER) │
+│                  │                    └──────────────────────┘
+│  Output: P₁(s)   │                              │
+└──────────────────┘                              │
+        │                                         │
+        │                                         ▼
+        │                              ┌──────────────────────┐
+        │                              │  Span Agent          │
+        │                              │  Verifier            │
+        │                              │  (Per-sentence LLM)  │
+        │                              └──────────────────────┘
+        │                                         │
+        └─────────────────┬───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │   Span Fusion         │
+              │   (Per-sentence)     │
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Per-Sentence Results│
+              │  - Classification    │
+              │  - Entity Score      │
+              │  - Agent Score       │
+              │  - Final Score       │
+              │  - Label             │
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  JSON Output          │
+              │  (List of sentences  │
+              │   with labels)       │
+              └───────────────────────┘
+```
+
+### Architecture Comparison
+
+| Feature | Response-Level | Sentence-Level |
+|---------|---------------|----------------|
+| **Granularity** | Entire response | Individual sentences |
+| **Output** | Single label per response | Label per sentence |
+| **Localization** | No | Yes (identifies specific sentences) |
+| **Use Case** | Fast bulk classification | Fine-grained analysis |
+| **Processing** | Single pass | Per-sentence processing |
+| **Context** | Full response | Sentence + surrounding context |
 
 ## ✨ Features
 
