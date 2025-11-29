@@ -5,7 +5,7 @@ Combines classification, entity verification, and agent verification scores
 at the sentence level using weighted fusion.
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 import sys
 import os
