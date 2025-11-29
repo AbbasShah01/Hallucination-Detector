@@ -637,7 +637,7 @@ def main():
             # Print results
             print(f"\nDetected {len(results)} sentences:")
             for result in results:
-                label_icon = "❌" if result['label'] == 'hallucinated' else "✅"
+                label_icon = "[X]" if result['label'] == 'hallucinated' else "[OK]"
                 print(f"\n{label_icon} [{result['sentence_index']}] {result['sentence']}")
                 print(f"   Final score: {result['final_hallucination_score']:.3f} ({result['label']})")
                 print(f"   Confidence: {result['confidence']:.3f}")
