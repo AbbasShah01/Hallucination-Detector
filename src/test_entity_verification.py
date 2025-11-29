@@ -60,7 +60,7 @@ class TestEntityExtractor(unittest.TestCase):
         """Test extraction of organization entities."""
         text = "Microsoft and Google are tech companies."
         entities = self.extractor.extract_entities(text)
-        entity_texts = [e.text.lower() for text in entities]
+        entity_texts = [e.text.lower() for e in entities]
         # Should find at least one organization
         self.assertGreater(len(entities), 0)
     

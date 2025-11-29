@@ -1,0 +1,44 @@
+﻿python : Some weights of the model checkpoint at dslim/bert-base-NER were not used when initializing 
+BertForTokenClassification: ['bert.pooler.dense.bias', 'bert.pooler.dense.weight']
+At C:\Users\pc\AppData\Local\Temp\ps-script-7b308837-41f0-46a2-a88f-1b19e5ba75b1.ps1:87 char:19
++ cd "d:\Gen proj"; python test_all_modules.py 2>&1 | Out-File -Encodin ...
++                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Some weights of....dense.weight']:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+- This IS expected if you are initializing BertForTokenClassification from the checkpoint of a model trained on 
+another task or with another architecture (e.g. initializing a BertForSequenceClassification model from a 
+BertForPreTraining model).
+- This IS NOT expected if you are initializing BertForTokenClassification from the checkpoint of a model that you 
+expect to be exactly identical (initializing a BertForSequenceClassification model from a 
+BertForSequenceClassification model).
+Device set to use cpu
+2025-11-29 18:55:21,658 - HallucinationDetectionPipeline - INFO - Master pipeline initialized
+======================================================================
+COMPREHENSIVE MODULE TESTING
+======================================================================
+[PASS] Uncertainty-Driven Scorer: PASSED
+[PASS] Hybrid Fusion: PASSED
+Warning: spaCy not available. Install with: pip install spacy
+[PASS] Entity Verification: PASSED
+[PASS] RAGS Architecture: PASSED
+[PASS] Evaluation Framework: PASSED
+[PASS] Data Generation: PASSED
+Loading preprocessed data from data/preprocessed/tokenized_data.json...
+Loaded 20 samples
+Loading tokenizer from data/preprocessed/tokenizer...
+[PASS] Data Loading: PASSED
+Warning: spaCy not available. Install with: pip install spacy
+[INFO] Master pipeline initialized
+[PASS] Master Pipeline: PASSED
+
+======================================================================
+TEST SUMMARY
+======================================================================
+Total Tests: 8
+Passed: 8
+Failed: 0
+Success Rate: 100.0%
+
+[SUCCESS] ALL TESTS PASSED!
+======================================================================
