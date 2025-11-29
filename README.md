@@ -60,7 +60,7 @@ The system supports two detection modes:
 │  Model           │                    │  (NER + Wikipedia)   │
 │  (DistilBERT)    │                    └──────────────────────┘
 │                  │                              │
-│  Output: P₁      │                              │
+│  Output: C       │                              │
 └──────────────────┘                              │
         │                                         │
         │                                         ▼
@@ -76,17 +76,37 @@ The system supports two detection modes:
         │                              │   Aleatoric)         │
         │                              └──────────────────────┘
         │                                         │
+        │                                         ▼
+        │                              ┌──────────────────────┐
+        │                              │  SHDS Calculator      │
+        │                              │  (Novel Metric)      │
+        │                              │  - Embedding Div.    │
+        │                              │  - Entity Mismatch    │
+        │                              │  - Reasoning Incons. │
+        │                              │  - Token Uncertainty │
+        │                              └──────────────────────┘
+        │                                         │
         └─────────────────┬───────────────────────┘
                           │
                           ▼
               ┌───────────────────────┐
-              │   Adaptive Fusion     │
-              │   (4-way weighted)    │
+              │   Fusion Method       │
+              │   ┌─────────────────┐ │
+              │   │ Classic Fusion   │ │
+              │   │ (Fixed weights) │ │
+              │   └─────────────────┘ │
+              │   ┌─────────────────┐ │
+              │   │ DMSF (Novel)    │ │
+              │   │ (Dynamic weights│ │
+              │   │  + Agreement)   │ │
+              │   └─────────────────┘ │
               └───────────────────────┘
                           │
                           ▼
               ┌───────────────────────┐
               │  Final Prediction     │
+              │  H = αC + βE + γA    │
+              │     + δSHDS + Bias    │
               │  + Uncertainty        │
               │  + Confidence        │
               └───────────────────────┘
@@ -122,7 +142,7 @@ The system supports two detection modes:
 │  (Per-sentence   │                    │  Verifier           │
 │   Transformer)   │                    │  (Per-sentence NER) │
 │                  │                    └──────────────────────┘
-│  Output: P₁(s)   │                              │
+│  Output: C(s)    │                              │
 └──────────────────┘                              │
         │                                         │
         │                                         ▼
@@ -132,12 +152,25 @@ The system supports two detection modes:
         │                              │  (Per-sentence LLM)  │
         │                              └──────────────────────┘
         │                                         │
+        │                                         ▼
+        │                              ┌──────────────────────┐
+        │                              │  Span SHDS           │
+        │                              │  (Per-sentence)      │
+        │                              │  Novel Metric        │
+        │                              └──────────────────────┘
+        │                                         │
         └─────────────────┬───────────────────────┘
                           │
                           ▼
               ┌───────────────────────┐
               │   Span Fusion         │
-              │   (Per-sentence)     │
+              │   ┌─────────────────┐ │
+              │   │ Classic Fusion   │ │
+              │   └─────────────────┘ │
+              │   ┌─────────────────┐ │
+              │   │ DMSF (Novel)    │ │
+              │   │ (Dynamic)       │ │
+              │   └─────────────────┘ │
               └───────────────────────┘
                           │
                           ▼
@@ -146,6 +179,7 @@ The system supports two detection modes:
               │  - Classification    │
               │  - Entity Score      │
               │  - Agent Score       │
+              │  - SHDS Score        │
               │  - Final Score       │
               │  - Label             │
               └───────────────────────┘
@@ -168,6 +202,51 @@ The system supports two detection modes:
 | **Use Case** | Fast bulk classification | Fine-grained analysis |
 | **Processing** | Single pass | Per-sentence processing |
 | **Context** | Full response | Sentence + surrounding context |
+| **SHDS Integration** | Yes | Yes (per-sentence) |
+| **DMSF Support** | Yes | Yes |
+
+### Novel Components Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Novel Research Components                 │
+└─────────────────────────────────────────────────────────────┘
+
+1. SHDS (Semantic Hallucination Divergence Score)
+   ┌─────────────────────────────────────────────────────┐
+   │  Input: Text Span                                    │
+   │         ├─→ Embedding Divergence (Semantic Distance) │
+   │         ├─→ Entity Mismatch Penalty (Factual Errors)│
+   │         ├─→ Reasoning Inconsistency (Logic Errors)  │
+   │         └─→ Token Uncertainty (Model Confidence)     │
+   │                                                      │
+   │  Output: SHDS Score [0,1]                           │
+   │          Component Breakdown                         │
+   └─────────────────────────────────────────────────────┘
+
+2. DMSF (Dynamic Multi-Signal Fusion)
+   ┌─────────────────────────────────────────────────────┐
+   │  Input Signals:                                      │
+   │    - Classifier Score (C)                           │
+   │    - Entity Score (E)                               │
+   │    - Agentic Score (A)                              │
+   │    - SHDS Score                                     │
+   │                                                      │
+   │  Dynamic Analysis:                                   │
+   │    ├─→ Compute Signal Agreement                     │
+   │    ├─→ Compute Uncertainty Level                    │
+   │    └─→ Detect Entity Mismatch                       │
+   │                                                      │
+   │  Weight Adjustment:                                  │
+   │    ├─→ High Disagreement → ↑ SHDS weight            │
+   │    ├─→ High Agreement → ↓ SHDS weight               │
+   │    ├─→ High Uncertainty → ↑ Agent + SHDS            │
+   │    └─→ Strong Entity Mismatch → ↑ Entity            │
+   │                                                      │
+   │  Output: Final Score H                               │
+   │          H = αC + βE + γA + δSHDS + DynamicBias      │
+   └─────────────────────────────────────────────────────┘
+```
 
 ## ✨ Features
 
