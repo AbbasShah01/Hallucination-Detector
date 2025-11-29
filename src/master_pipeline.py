@@ -65,6 +65,18 @@ except ImportError as e:
     SPAN_LEVEL_AVAILABLE = False
     SpanInferencePipeline = None
 
+# Import novel research modules
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from modules.novel_metric.shds import SHDS
+    from modules.fusion.dmsf import DMSF
+    NOVEL_MODULES_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Could not import novel modules: {e}")
+    NOVEL_MODULES_AVAILABLE = False
+    SHDS = None
+    DMSF = None
+
 
 class PipelineLogger:
     """Custom logger for pipeline execution."""
@@ -150,6 +162,17 @@ class MasterPipeline:
         self.entity_verifier = None
         self.agentic_verifier = None
         self.span_pipeline = None  # Sentence-level pipeline
+        self.shds_calculator = None  # SHDS metric calculator
+        self.dmsf_fusion = None  # DMSF fusion calculator
+        
+        # Initialize novel modules if available
+        if NOVEL_MODULES_AVAILABLE:
+            try:
+                self.shds_calculator = SHDS()
+                self.dmsf_fusion = DMSF()
+                self.logger.info("Novel research modules (SHDS, DMSF) initialized")
+            except Exception as e:
+                self.logger.warning(f"Could not initialize novel modules: {e}")
         
         self.logger.info("Master pipeline initialized")
     
@@ -179,6 +202,7 @@ class MasterPipeline:
                 "agentic_provider": None  # "openai" or "anthropic" if using API
             },
             "fusion": {
+                "method": "classic_fusion",  # "classic_fusion" or "novel_dmsf"
                 "alpha": 0.7,  # Weight for transformer
                 "beta": 0.2,   # Weight for entity verification
                 "gamma": 0.1,  # Weight for agentic verification
@@ -378,30 +402,61 @@ class MasterPipeline:
                     self.logger.debug(f"Agentic verification error: {e}")
             predictions["agentic_scores"].append(agentic_score)
             
-            # Hybrid fusion
-            if use_hybrid and self.entity_verifier:
-                if self.agentic_verifier:
-                    # Three-way fusion
-                    fusion_prob = integrate_with_hybrid_fusion(
-                        transformer_prob=transformer_prob,
-                        factual_score=factual_score,
+            # Fusion (classic or novel DMSF)
+            fusion_method = fusion_config.get("method", "classic_fusion")
+            
+            if fusion_method == "novel_dmsf" and NOVEL_MODULES_AVAILABLE and self.dmsf_fusion:
+                # Use novel DMSF fusion
+                try:
+                    # Compute SHDS if needed
+                    shds_result = None
+                    if self.shds_calculator:
+                        shds_result = self.shds_calculator.compute(
+                            span=response,
+                            failed_entity_checks=0,  # Would need entity verification details
+                            total_entities=0,
+                            agentic_verification_score=agentic_score
+                        )
+                    
+                    # DMSF fusion
+                    dmsf_result = self.dmsf_fusion.fuse(
+                        classifier_score=transformer_prob,
+                        entity_score=factual_score,
                         agentic_score=agentic_score,
-                        alpha=fusion_config["alpha"],
-                        beta=fusion_config["beta"],
-                        gamma=fusion_config["gamma"]
+                        shds_score=shds_result.shds_score if shds_result else None,
+                        span=response,
+                        compute_shds=(shds_result is None)
                     )
+                    fusion_prob = dmsf_result.final_score
+                except Exception as e:
+                    self.logger.warning(f"DMSF fusion failed, falling back to classic: {e}")
+                    fusion_method = "classic_fusion"  # Fallback
+            
+            if fusion_method == "classic_fusion":
+                # Classic hybrid fusion
+                if use_hybrid and self.entity_verifier:
+                    if self.agentic_verifier:
+                        # Three-way fusion
+                        fusion_prob = integrate_with_hybrid_fusion(
+                            transformer_prob=transformer_prob,
+                            factual_score=factual_score,
+                            agentic_score=agentic_score,
+                            alpha=fusion_config["alpha"],
+                            beta=fusion_config["beta"],
+                            gamma=fusion_config["gamma"]
+                        )
+                    else:
+                        # Two-way fusion
+                        result = hybrid_predict(
+                            transformer_prob=transformer_prob,
+                            factual_score=factual_score,
+                            alpha=fusion_config["alpha"],
+                            threshold=fusion_config["threshold"]
+                        )
+                        fusion_prob = result.fusion_prob
                 else:
-                    # Two-way fusion
-                    result = hybrid_predict(
-                        transformer_prob=transformer_prob,
-                        factual_score=factual_score,
-                        alpha=fusion_config["alpha"],
-                        threshold=fusion_config["threshold"]
-                    )
-                    fusion_prob = result.fusion_prob
-            else:
-                # Transformer only
-                fusion_prob = transformer_prob
+                    # Transformer only
+                    fusion_prob = transformer_prob
             
             predictions["fusion_probs"].append(fusion_prob)
             predictions["final_predictions"].append(
@@ -611,6 +666,13 @@ def main():
         default=None,
         help="Text to analyze (for sentence-level mode)"
     )
+    parser.add_argument(
+        "--fusion-method",
+        type=str,
+        choices=["classic_fusion", "novel_dmsf"],
+        default=None,
+        help="Fusion method: 'classic_fusion' or 'novel_dmsf'"
+    )
     
     args = parser.parse_args()
     
@@ -624,8 +686,10 @@ def main():
         log_file=args.log_file
     )
     
-    # Update config with mode
+    # Update config with mode and fusion method
     pipeline.config["mode"] = args.mode
+    if args.fusion_method:
+        pipeline.config["fusion"]["method"] = args.fusion_method
     
     # Run based on mode
     if args.mode == "sentence_level":

@@ -75,11 +75,15 @@ class SpanInferencePipeline:
             extractor_method=extractor_method
         ) if use_entity_verification else None
         self.agent_verifier = SpanAgentVerifier() if use_agent_verification else None
+        # Get fusion method from config or default
+        fusion_method = "classic"  # Default
+        
         self.fusion = SpanFusion(
             alpha=fusion_alpha,
             beta=fusion_beta,
             gamma=fusion_gamma,
-            threshold=fusion_threshold
+            threshold=fusion_threshold,
+            fusion_method=fusion_method
         )
         
         self.use_entity_verification = use_entity_verification

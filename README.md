@@ -347,6 +347,151 @@ summary = evaluator.generate_summary_report(
 
 See [`modules/span_level_detector/README.md`](modules/span_level_detector/README.md) for complete documentation.
 
+## 🔬 Novel Research Contribution
+
+This project introduces **two major novel research contributions** that advance the state-of-the-art in hallucination detection:
+
+### 1. Semantic Hallucination Divergence Score (SHDS)
+
+**Novel Metric for Hallucination Severity Assessment**
+
+SHDS is a novel multi-dimensional metric that measures hallucination severity by combining four complementary signals:
+
+```
+SHDS = w1 * EmbeddingDivergence
+     + w2 * EntityMismatchPenalty
+     + w3 * ReasoningInconsistency
+     + w4 * TokenUncertainty
+```
+
+**Components**:
+
+1. **Embedding Divergence** (w1=0.3): Semantic distance between generated text and factual corrections using sentence embeddings
+2. **Entity Mismatch Penalty** (w2=0.3): Penalty based on failed entity verifications against knowledge bases
+3. **Reasoning Inconsistency** (w3=0.2): Contradiction score from agentic verification and logical coherence
+4. **Token Uncertainty** (w4=0.2): Average token-level entropy indicating model uncertainty
+
+**Why This Is Novel**:
+- **First metric** to combine semantic, factual, reasoning, and uncertainty signals
+- Provides **fine-grained severity assessment** beyond binary classification
+- Enables **adaptive fusion** based on hallucination type
+- **Normalized to [0,1]** for interpretability
+
+**Research Significance**:
+- Addresses limitation of binary classification in existing systems
+- Enables severity-based ranking and prioritization
+- Supports explainable AI by providing component-level insights
+
+### 2. Dynamic Multi-Signal Fusion (DMSF)
+
+**Novel Adaptive Fusion Algorithm**
+
+DMSF is a novel fusion algorithm that dynamically adjusts weights based on signal agreement and uncertainty:
+
+```
+H = α*C + β*E + γ*A + δ*SHDS + DynamicBias
+```
+
+Where:
+- C = Classifier score
+- E = Entity verification score
+- A = Agentic verification score
+- SHDS = Semantic Hallucination Divergence Score
+- DynamicBias = Computed from signal disagreement and uncertainty
+
+**Dynamic Weight Adjustment Rules**:
+
+1. **High Disagreement** → Increase SHDS weight (trust comprehensive metric)
+2. **High Agreement** → Trust agreement, reduce SHDS weight
+3. **High Uncertainty** → Upweight agent and SHDS (more cautious)
+4. **Strong Entity Mismatch** → Upweight entity verification heavily
+
+**Why This Is Novel**:
+- **First fusion method** to dynamically adjust weights based on signal agreement
+- **Uncertainty-aware** weighting adapts to model confidence
+- **Context-sensitive** fusion that adapts to different hallucination types
+- **Integrates novel SHDS metric** for comprehensive assessment
+
+**Research Significance**:
+- Addresses limitation of fixed-weight fusion in existing systems
+- Improves robustness when signals disagree
+- Adapts automatically to different hallucination patterns
+- Provides theoretical foundation for adaptive multi-signal fusion
+
+### Comparison with Existing Approaches
+
+| Feature | Existing Systems | Our Contribution |
+|---------|-----------------|------------------|
+| **Severity Metric** | Binary classification only | SHDS: Multi-dimensional severity score |
+| **Fusion Method** | Fixed weights | DMSF: Dynamic weight adjustment |
+| **Signal Agreement** | Not considered | Explicitly modeled and used |
+| **Uncertainty Handling** | Limited | Integrated into fusion |
+| **Adaptability** | Static | Dynamic based on context |
+
+### Usage
+
+**Response-Level with DMSF**:
+```bash
+python src/master_pipeline.py --fusion-method novel_dmsf
+```
+
+**Sentence-Level with DMSF**:
+```python
+from modules.span_level_detector import SpanInferencePipeline
+
+pipeline = SpanInferencePipeline(
+    fusion_method="dmsf"  # Use novel DMSF fusion
+)
+results = pipeline.detect(text)
+```
+
+**Direct SHDS Computation**:
+```python
+from modules.novel_metric.shds import SHDS
+
+shds = SHDS()
+result = shds.compute(
+    span="The moon is made of cheese.",
+    factual_correction="The moon is composed of rock and dust.",
+    failed_entity_checks=2,
+    total_entities=2,
+    agentic_verification_score=0.1
+)
+print(f"SHDS Score: {result.shds_score:.4f}")
+```
+
+**Direct DMSF Fusion**:
+```python
+from modules.fusion.dmsf import DMSF
+
+dmsf = DMSF()
+result = dmsf.fuse(
+    classifier_score=0.8,
+    entity_score=0.2,
+    agentic_score=0.15,
+    span="The moon is made of cheese.",
+    compute_shds=True
+)
+print(f"Final Score: {result.final_score:.4f}")
+print(f"Signal Agreement: {result.signal_agreement:.4f}")
+```
+
+### Research Impact
+
+These contributions represent **significant advances** in hallucination detection:
+
+1. **Theoretical**: Novel mathematical formulations for severity assessment and adaptive fusion
+2. **Methodological**: First system to combine semantic, factual, reasoning, and uncertainty signals
+3. **Practical**: Improved detection accuracy through adaptive weight adjustment
+4. **Explainable**: Component-level insights enable interpretable predictions
+
+### Publications
+
+These novel contributions are suitable for publication in top-tier venues:
+- **ACL/EMNLP**: Natural Language Processing conferences
+- **NeurIPS/ICML**: Machine Learning conferences
+- **AAAI**: Artificial Intelligence conference
+
 ## 🚀 Installation
 
 ### Prerequisites

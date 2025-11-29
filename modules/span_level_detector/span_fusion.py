@@ -19,6 +19,17 @@ try:
 except ImportError:
     FUSION_AVAILABLE = False
 
+# Import novel DMSF fusion
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
+    from modules.fusion.dmsf import DMSF
+    from modules.novel_metric.shds import SHDS
+    DMSF_AVAILABLE = True
+except ImportError:
+    DMSF_AVAILABLE = False
+    DMSF = None
+    SHDS = None
+
 
 @dataclass
 class SpanFusionResult:
@@ -52,7 +63,8 @@ class SpanFusion:
         alpha: float = 0.5,  # Weight for classification
         beta: float = 0.3,   # Weight for entity verification
         gamma: float = 0.2,  # Weight for agent verification
-        threshold: float = 0.5
+        threshold: float = 0.5,
+        fusion_method: str = "classic"  # "classic" or "dmsf"
     ):
         """
         Initialize span fusion.
@@ -69,12 +81,25 @@ class SpanFusion:
         self.beta = beta / total
         self.gamma = gamma / total
         self.threshold = threshold
+        self.fusion_method = fusion_method
+        
+        # Initialize DMSF if requested
+        self.dmsf = None
+        self.shds = None
+        if fusion_method == "dmsf" and DMSF_AVAILABLE:
+            try:
+                self.dmsf = DMSF(alpha=alpha, beta=beta, gamma=gamma, delta=0.15)
+                self.shds = SHDS()
+            except Exception as e:
+                print(f"Warning: Could not initialize DMSF: {e}")
+                self.fusion_method = "classic"
     
     def fuse(
         self,
         classification_score: float,
         entity_verification_score: float,
-        agent_verification_score: Optional[float] = None
+        agent_verification_score: Optional[float] = None,
+        span: Optional[str] = None
     ) -> Dict:
         """
         Fuse scores for a single sentence.
@@ -115,25 +140,69 @@ class SpanFusion:
                 beta_adj * entity_hallucination
             )
         
-        # Clamp to [0, 1]
-        fusion_score = max(0.0, min(1.0, fusion_score))
-        
         # Classify
         label = "hallucinated" if fusion_score >= self.threshold else "factual"
         
-        # Confidence: distance from threshold
-        confidence = abs(fusion_score - self.threshold) * 2  # Scale to [0, 1]
+        # Confidence: distance from threshold (if not already computed)
+        if 'confidence' not in locals():
+            confidence = abs(fusion_score - self.threshold) * 2  # Scale to [0, 1]
+        
+        # Fusion weights (if not already computed)
+        if 'fusion_weights' not in locals():
+            fusion_weights = {
+                "alpha": self.alpha,
+                "beta": self.beta,
+                "gamma": self.gamma if agent_verification_score is not None else 0.0
+            }
         
         return {
             "final_hallucination_score": fusion_score,
             "label": label,
             "confidence": confidence,
-            "fusion_weights": {
-                "alpha": self.alpha,
-                "beta": self.beta,
-                "gamma": self.gamma if agent_verification_score is not None else 0.0
-            }
+            "fusion_weights": fusion_weights
         }
+    
+    def _classic_fuse(
+        self,
+        classification_score: float,
+        entity_verification_score: float,
+        agent_verification_score: Optional[float] = None
+    ) -> Tuple[float, float, Dict]:
+        """Classic weighted fusion."""
+        # Convert verification scores to hallucination probabilities
+        entity_hallucination = 1.0 - entity_verification_score
+        
+        if agent_verification_score is not None:
+            agent_hallucination = 1.0 - agent_verification_score
+            # Three-way fusion
+            fusion_score = (
+                self.alpha * classification_score +
+                self.beta * entity_hallucination +
+                self.gamma * agent_hallucination
+            )
+        else:
+            # Two-way fusion
+            alpha_adj = self.alpha / (self.alpha + self.beta)
+            beta_adj = self.beta / (self.alpha + self.beta)
+            fusion_score = (
+                alpha_adj * classification_score +
+                beta_adj * entity_hallucination
+            )
+        
+        # Clamp to [0, 1]
+        fusion_score = max(0.0, min(1.0, fusion_score))
+        
+        # Confidence
+        confidence = abs(fusion_score - self.threshold) * 2
+        
+        # Weights
+        fusion_weights = {
+            "alpha": self.alpha,
+            "beta": self.beta,
+            "gamma": self.gamma if agent_verification_score is not None else 0.0
+        }
+        
+        return fusion_score, confidence, fusion_weights
     
     def fuse_span_result(
         self,
