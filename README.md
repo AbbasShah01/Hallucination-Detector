@@ -181,6 +181,90 @@ final_score = integrate_with_hybrid_fusion(
 
 See [`src/uncertainty_driven_scorer.py`](src/uncertainty_driven_scorer.py) for complete implementation.
 
+### Sentence-Level (Span-Level) Hallucination Detector
+
+A **novel research contribution** that provides **fine-grained hallucination localization** at the sentence level. Unlike response-level detection that classifies entire responses, this module identifies which specific sentences contain hallucinations, enabling precise error localization.
+
+**Key Features**:
+- **Sentence-Level Splitting**: Robust sentence boundary detection using NLTK, spaCy, or regex fallback
+- **Per-Sentence Classification**: Applies transformer-based classification to each sentence individually
+- **Per-Sentence Entity Verification**: Extracts and verifies entities within each sentence
+- **Per-Sentence Agent Verification**: Uses LLM-based verification for each sentence (optional)
+- **Sentence-Level Fusion**: Combines multiple signals at the sentence level
+- **Detailed JSON Output**: Returns per-sentence labels with scores and confidence
+
+**Research Contribution**:
+1. **Fine-Grained Localization**: Identifies specific sentences containing hallucinations
+2. **Multi-Signal Fusion**: Combines classification, entity verification, and agent verification at sentence level
+3. **Context-Aware Processing**: Uses surrounding sentences as context for better classification
+4. **Scalable Architecture**: Processes sentences in batches for efficiency
+
+**Usage**:
+```python
+from modules.span_level_detector import SpanInferencePipeline
+
+# Initialize pipeline
+pipeline = SpanInferencePipeline(
+    model_path="models/distilbert_halueval",  # Optional: path to fine-tuned model
+    use_entity_verification=True,
+    use_agent_verification=False
+)
+
+# Detect hallucinations at sentence level
+text = """
+Large Language Models have achieved remarkable success.
+However, they frequently generate hallucinations.
+The moon is made of cheese.
+"""
+
+results = pipeline.detect(text, return_json=True)
+
+# Print results
+for result in results:
+    print(f"Sentence: {result['sentence']}")
+    print(f"Label: {result['label']}")
+    print(f"Score: {result['final_hallucination_score']:.3f}")
+    print()
+```
+
+**Command-Line Usage**:
+```bash
+# Sentence-level detection
+python src/master_pipeline.py --mode sentence_level --text "Your text here..."
+
+# Response-level detection (default)
+python src/master_pipeline.py --mode response_level
+```
+
+**Output Format**:
+Each sentence returns a JSON object:
+```json
+{
+  "sentence": "The moon is made of cheese.",
+  "classification_score": 0.8234,
+  "entity_verification_score": 0.2500,
+  "agent_verification_score": 0.1500,
+  "final_hallucination_score": 0.7123,
+  "label": "hallucinated",
+  "confidence": 0.4246,
+  "sentence_index": 2
+}
+```
+
+**Evaluation**:
+```python
+from evaluation.span_level_evaluation import SpanLevelEvaluator
+
+evaluator = SpanLevelEvaluator()
+summary = evaluator.generate_summary_report(
+    predictions=predictions,
+    ground_truth=ground_truth,
+    output_path="results/span_evaluation.json"
+)
+```
+
+See [`modules/span_level_detector/README.md`](modules/span_level_detector/README.md) for complete documentation.
+
 ## 🚀 Installation
 
 ### Prerequisites

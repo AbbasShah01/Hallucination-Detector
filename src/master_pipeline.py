@@ -54,6 +54,17 @@ try:
 except ImportError as e:
     print(f"Warning: Could not import evaluate_model: {e}")
 
+# Import sentence-level detector
+try:
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from modules.span_level_detector import SpanInferencePipeline
+    SPAN_LEVEL_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Could not import span-level detector: {e}")
+    SPAN_LEVEL_AVAILABLE = False
+    SpanInferencePipeline = None
+
 
 class PipelineLogger:
     """Custom logger for pipeline execution."""
@@ -138,6 +149,7 @@ class MasterPipeline:
         self.tokenizer = None
         self.entity_verifier = None
         self.agentic_verifier = None
+        self.span_pipeline = None  # Sentence-level pipeline
         
         self.logger.info("Master pipeline initialized")
     
@@ -174,7 +186,8 @@ class MasterPipeline:
             },
             "evaluation": {
                 "num_samples": 10
-            }
+            },
+            "mode": "response_level"  # "response_level" or "sentence_level"
         }
     
     def step1_load_data(self):
@@ -436,6 +449,43 @@ class MasterPipeline:
         except Exception as e:
             self.logger.error(f"Evaluation error: {e}")
     
+    def detect_sentence_level(self, text: str) -> List[Dict]:
+        """
+        Detect hallucinations at sentence level.
+        
+        Args:
+            text: Input text to analyze
+        
+        Returns:
+            List of sentence-level detection results
+        """
+        if not SPAN_LEVEL_AVAILABLE:
+            raise ValueError("Sentence-level detection not available. Install required dependencies.")
+        
+        # Initialize span pipeline if not already done
+        if self.span_pipeline is None:
+            model_path = None
+            if self.model is not None:
+                # Use trained model if available
+                model_path = os.path.join(self.output_dir, "trained_model")
+            
+            self.span_pipeline = SpanInferencePipeline(
+                model_path=model_path,
+                splitter_method="nltk",
+                extractor_method=self.config["verification"].get("entity_extractor_method", "transformers"),
+                use_entity_verification=self.config["verification"].get("use_entity_verification", True),
+                use_agent_verification=self.config["verification"].get("use_agentic_verification", False),
+                fusion_alpha=self.config["fusion"]["alpha"],
+                fusion_beta=self.config["fusion"]["beta"],
+                fusion_gamma=self.config["fusion"]["gamma"],
+                fusion_threshold=self.config["fusion"]["threshold"]
+            )
+        
+        # Detect
+        results = self.span_pipeline.detect(text, return_json=True)
+        
+        return results
+    
     def step6_generate_sample_outputs(self, predictions: Dict):
         """Step 6: Generate sample predictions output."""
         self.logger.info("\n" + "=" * 70)
@@ -548,20 +598,68 @@ def main():
         default="results/pipeline.log",
         help="Path to log file"
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["response_level", "sentence_level"],
+        default="response_level",
+        help="Detection mode: 'response_level' or 'sentence_level'"
+    )
+    parser.add_argument(
+        "--text",
+        type=str,
+        default=None,
+        help="Text to analyze (for sentence-level mode)"
+    )
     
     args = parser.parse_args()
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Initialize and run pipeline
+    # Initialize pipeline
     pipeline = MasterPipeline(
         config_path=args.config,
         output_dir=args.output_dir,
         log_file=args.log_file
     )
     
-    pipeline.run_full_pipeline()
+    # Update config with mode
+    pipeline.config["mode"] = args.mode
+    
+    # Run based on mode
+    if args.mode == "sentence_level":
+        if args.text:
+            # Single text analysis
+            print(f"\nAnalyzing text in sentence-level mode...")
+            results = pipeline.detect_sentence_level(args.text)
+            
+            # Print results
+            print(f"\nDetected {len(results)} sentences:")
+            for result in results:
+                label_icon = "❌" if result['label'] == 'hallucinated' else "✅"
+                print(f"\n{label_icon} [{result['sentence_index']}] {result['sentence']}")
+                print(f"   Final score: {result['final_hallucination_score']:.3f} ({result['label']})")
+                print(f"   Confidence: {result['confidence']:.3f}")
+            
+            # Save results
+            output_path = os.path.join(args.output_dir, "sentence_level_results.json")
+            pipeline.span_pipeline.save_results(results, output_path)
+            print(f"\nResults saved to: {output_path}")
+            
+            # Summary
+            summary = pipeline.span_pipeline.get_summary(results)
+            print(f"\nSummary:")
+            print(f"  Total sentences: {summary['total_sentences']}")
+            print(f"  Hallucinated: {summary['hallucinated_sentences']}")
+            print(f"  Factual: {summary['factual_sentences']}")
+            print(f"  Hallucination rate: {summary['hallucination_rate']:.2%}")
+        else:
+            print("Error: --text argument required for sentence-level mode")
+            print("Usage: python src/master_pipeline.py --mode sentence_level --text 'Your text here'")
+    else:
+        # Response-level mode (default)
+        pipeline.run_full_pipeline()
 
 
 if __name__ == "__main__":
