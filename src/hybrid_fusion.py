@@ -8,6 +8,13 @@ from typing import Tuple, List, Dict, Optional
 from dataclasses import dataclass
 import numpy as np
 
+# Import uncertainty-driven scorer for integration
+try:
+    from uncertainty_driven_scorer import UncertaintyDrivenScorer, integrate_with_hybrid_fusion as integrate_uncertainty
+    UNCERTAINTY_AVAILABLE = True
+except ImportError:
+    UNCERTAINTY_AVAILABLE = False
+
 
 @dataclass
 class FusionResult:
