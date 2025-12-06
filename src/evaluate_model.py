@@ -1,6 +1,25 @@
 """
 Evaluation script for Hybrid Hallucination Detection System
 Computes metrics, generates confusion matrix, ROC curve, and sample outputs.
+
+LABEL MAPPING:
+- 0 = Correct / Non-Hallucination (negative class)
+- 1 = Hallucination (positive class)
+
+METRIC CONFIGURATION:
+- Binary classification with pos_label=1 (hallucination is positive)
+- Uses average='binary' for binary metrics
+- Uses average='macro' and 'weighted' for multi-class style averages
+- zero_division=0 to handle cases where a class has no samples
+
+OUTPUT FILES:
+- Confusion matrix: results/confusion_matrix.png and results/figs/confusion_matrix.png
+- ROC curve: results/roc_curve.png and results/figs/roc_curve.png
+- Metrics comparison: results/metrics_comparison.png and results/figs/metrics_comparison.png
+- Evaluation metrics: results/evaluation_metrics.json
+- Confusion matrix JSON: results/confusion_matrix.json
+- Sample outputs: results/sample_outputs.json
+- Final metrics summary: results/final_metrics.txt
 """
 
 import os
@@ -493,6 +512,20 @@ def evaluate_model(
     df = load_test_data(test_data_path)
     y_true = df['label'].values
     
+    # Log label distribution
+    unique_labels, label_counts = np.unique(y_true, return_counts=True)
+    print(f"\nTest Set Label Distribution:")
+    print(f"  Total samples: {len(y_true)}")
+    for label, count in zip(unique_labels, label_counts):
+        label_name = "Hallucination" if label == 1 else "Correct"
+        print(f"  Class {label} ({label_name}): {count} samples ({100*count/len(y_true):.1f}%)")
+    
+    # Check for class imbalance
+    if len(unique_labels) < 2:
+        print(f"\n⚠️  WARNING: Test set contains only class {unique_labels[0]}!")
+        print("   Metrics for the missing class will be 0 or undefined.")
+        print("   Consider using a larger, balanced test set for reliable evaluation.")
+    
     # Step 2: Load predictions
     y_pred_proba = load_predictions(predictions_path)
     
@@ -500,10 +533,19 @@ def evaluate_model(
     if y_pred_proba.max() <= 1.0 and y_pred_proba.min() >= 0.0:
         # Assume these are probabilities
         y_pred = (y_pred_proba >= threshold).astype(int)
+        print(f"\nConverted probabilities to binary predictions using threshold={threshold}")
     else:
         # Assume these are already binary
         y_pred = y_pred_proba.astype(int)
         y_pred_proba = y_pred_proba.astype(float)  # Keep as probabilities for ROC
+        print(f"\nUsing predictions as binary labels")
+    
+    # Log prediction distribution
+    unique_preds, pred_counts = np.unique(y_pred, return_counts=True)
+    print(f"\nPrediction Distribution:")
+    for pred, count in zip(unique_preds, pred_counts):
+        pred_name = "Hallucination" if pred == 1 else "Correct"
+        print(f"  Predicted class {pred} ({pred_name}): {count} samples ({100*count/len(y_pred):.1f}%)")
     
     # Ensure lengths match
     if len(y_true) != len(y_pred):
@@ -512,7 +554,10 @@ def evaluate_model(
         y_pred = y_pred[:min_len]
         y_pred_proba = y_pred_proba[:min_len]
         df = df.iloc[:min_len]
-        print(f"Warning: Truncated to {min_len} samples to match lengths")
+        print(f"\n⚠️  WARNING: Truncated to {min_len} samples to match lengths")
+        # Recalculate distributions after truncation
+        unique_labels, label_counts = np.unique(y_true, return_counts=True)
+        unique_preds, pred_counts = np.unique(y_pred, return_counts=True)
     
     # Step 3: Compute metrics
     print("\n" + "-" * 70)
@@ -603,13 +648,64 @@ def evaluate_model(
     cm_dict = {
         'true_negative': int(cm[0, 0]),
         'false_positive': int(cm[0, 1]),
-        'false_negative': int(cm[1, 0]),
-        'true_positive': int(cm[1, 1])
+        'false_negative': int(cm[1, 0]) if cm.shape[0] > 1 else 0,
+        'true_positive': int(cm[1, 1]) if cm.shape[0] > 1 and cm.shape[1] > 1 else 0
     }
     cm_path_json = os.path.join(output_dir, "confusion_matrix.json")
     with open(cm_path_json, 'w') as f:
         json.dump(cm_dict, f, indent=2)
     print(f"Confusion matrix saved to {cm_path_json}")
+    
+    # Step 8: Save final metrics summary as text file
+    summary_path = os.path.join(output_dir, "final_metrics.txt")
+    with open(summary_path, 'w') as f:
+        f.write("=" * 70 + "\n")
+        f.write("FINAL EVALUATION METRICS SUMMARY\n")
+        f.write("=" * 70 + "\n\n")
+        f.write(f"Test Set Size: {len(y_true)} samples\n")
+        f.write(f"Label Distribution:\n")
+        for label, count in zip(unique_labels, label_counts):
+            label_name = "Hallucination" if label == 1 else "Correct"
+            f.write(f"  Class {label} ({label_name}): {count} samples\n")
+        f.write(f"\nPrediction Distribution:\n")
+        for pred, count in zip(unique_preds, pred_counts):
+            pred_name = "Hallucination" if pred == 1 else "Correct"
+            f.write(f"  Predicted class {pred} ({pred_name}): {count} samples\n")
+        f.write("\n" + "-" * 70 + "\n")
+        f.write("OVERALL METRICS\n")
+        f.write("-" * 70 + "\n")
+        f.write(f"Accuracy:  {metrics['accuracy']:.4f}\n")
+        f.write(f"Precision (binary, pos=1): {metrics['precision']:.4f}\n")
+        f.write(f"Recall (binary, pos=1):    {metrics['recall']:.4f}\n")
+        f.write(f"F1-Score (binary, pos=1):  {metrics['f1_score']:.4f}\n")
+        f.write("\nMacro Averages:\n")
+        f.write(f"  Precision: {metrics['precision_macro']:.4f}\n")
+        f.write(f"  Recall:    {metrics['recall_macro']:.4f}\n")
+        f.write(f"  F1-Score:  {metrics['f1_macro']:.4f}\n")
+        f.write("\nWeighted Averages:\n")
+        f.write(f"  Precision: {metrics['precision_weighted']:.4f}\n")
+        f.write(f"  Recall:    {metrics['recall_weighted']:.4f}\n")
+        f.write(f"  F1-Score:  {metrics['f1_weighted']:.4f}\n")
+        f.write("\n" + "-" * 70 + "\n")
+        f.write("PER-CLASS METRICS\n")
+        f.write("-" * 70 + "\n")
+        f.write("Correct (Class 0):\n")
+        f.write(f"  Precision: {metrics['precision_per_class']['correct']:.4f}\n")
+        f.write(f"  Recall:    {metrics['recall_per_class']['correct']:.4f}\n")
+        f.write(f"  F1-Score:  {metrics['f1_per_class']['correct']:.4f}\n")
+        f.write("Hallucination (Class 1):\n")
+        f.write(f"  Precision: {metrics['precision_per_class']['hallucination']:.4f}\n")
+        f.write(f"  Recall:    {metrics['recall_per_class']['hallucination']:.4f}\n")
+        f.write(f"  F1-Score:  {metrics['f1_per_class']['hallucination']:.4f}\n")
+        f.write("\n" + "-" * 70 + "\n")
+        f.write("CONFUSION MATRIX\n")
+        f.write("-" * 70 + "\n")
+        f.write(f"True Negative (TN):  {cm_dict['true_negative']}\n")
+        f.write(f"False Positive (FP): {cm_dict['false_positive']}\n")
+        f.write(f"False Negative (FN): {cm_dict['false_negative']}\n")
+        f.write(f"True Positive (TP):  {cm_dict['true_positive']}\n")
+        f.write("\n" + "=" * 70 + "\n")
+    print(f"Final metrics summary saved to {summary_path}")
     
     print("\n" + "=" * 70)
     print("Evaluation completed!")
