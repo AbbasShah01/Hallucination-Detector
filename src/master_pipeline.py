@@ -18,6 +18,23 @@ from datetime import datetime
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
 
+# Import utilities for reproducibility
+try:
+    from utils import set_random_seeds, ensure_dir
+except ImportError:
+    # Fallback if utils not available
+    def set_random_seeds(seed=42):
+        import random
+        import torch
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    
+    def ensure_dir(path):
+        os.makedirs(path, exist_ok=True)
+
 # Import functions from train_model (which has the loaders)
 try:
     from train_model import (
@@ -136,7 +153,8 @@ class MasterPipeline:
         self,
         config_path: Optional[str] = None,
         output_dir: str = "results",
-        log_file: str = "results/pipeline.log"
+        log_file: str = "results/pipeline.log",
+        random_seed: int = 42
     ):
         """
         Initialize master pipeline.
@@ -145,9 +163,17 @@ class MasterPipeline:
             config_path: Path to configuration JSON file
             output_dir: Directory for output files
             log_file: Path to log file
+            random_seed: Random seed for reproducibility
         """
+        # Set random seeds for reproducibility
+        set_random_seeds(random_seed)
+        
         self.output_dir = output_dir
         self.logger = PipelineLogger(log_file)
+        
+        # Create output directories
+        ensure_dir(output_dir)
+        ensure_dir(os.path.join(output_dir, "figs"))
         
         # Load configuration
         if config_path and os.path.exists(config_path):
@@ -541,6 +567,29 @@ class MasterPipeline:
         
         return results
     
+    def step7_generate_latex_tables(self):
+        """Step 7: Generate LaTeX tables for paper."""
+        self.logger.info("\n" + "=" * 70)
+        self.logger.info("STEP 7: Generating LaTeX Tables")
+        self.logger.info("=" * 70)
+        
+        try:
+            from generate_latex_tables import generate_all_tables
+            
+            metrics_path = os.path.join(self.output_dir, "evaluation_metrics.json")
+            cm_path = os.path.join(self.output_dir, "confusion_matrix.json")
+            latex_output_dir = os.path.join(self.output_dir, "latex_tables")
+            
+            if os.path.exists(metrics_path) and os.path.exists(cm_path):
+                generate_all_tables(metrics_path, cm_path, latex_output_dir)
+                self.logger.info("[OK] LaTeX tables generated")
+            else:
+                self.logger.warning("Metrics files not found, skipping LaTeX table generation")
+        except ImportError:
+            self.logger.warning("Could not import generate_latex_tables, skipping")
+        except Exception as e:
+            self.logger.warning(f"Error generating LaTeX tables: {e}")
+    
     def step6_generate_sample_outputs(self, predictions: Dict):
         """Step 6: Generate sample predictions output."""
         self.logger.info("\n" + "=" * 70)
@@ -613,6 +662,9 @@ class MasterPipeline:
             
             # Step 6: Generate sample outputs
             self.step6_generate_sample_outputs(predictions)
+            
+            # Step 7: Generate LaTeX tables
+            self.step7_generate_latex_tables()
             
             # Summary
             end_time = datetime.now()

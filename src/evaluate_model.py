@@ -104,25 +104,81 @@ def load_predictions(predictions_path: str) -> np.ndarray:
 
 def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
     """
-    Compute classification metrics.
+    Compute classification metrics for binary classification.
     
     Args:
         y_true: True labels (0=correct, 1=hallucination)
         y_pred: Predicted labels (0=correct, 1=hallucination)
     
     Returns:
-        Dictionary with metrics
+        Dictionary with metrics including binary, macro, and weighted averages
     """
+    # Ensure labels are 1D arrays of integers
+    y_true = np.asarray(y_true, dtype=int).ravel()
+    y_pred = np.asarray(y_pred, dtype=int).ravel()
+    
+    # Verify same length
+    if len(y_true) != len(y_pred):
+        raise ValueError(f"y_true and y_pred must have same length. Got {len(y_true)} and {len(y_pred)}")
+    
+    # Verify labels are binary (0 or 1)
+    unique_true = np.unique(y_true)
+    unique_pred = np.unique(y_pred)
+    if not all(label in [0, 1] for label in unique_true):
+        raise ValueError(f"y_true contains non-binary labels: {unique_true}")
+    if not all(label in [0, 1] for label in unique_pred):
+        raise ValueError(f"y_pred contains non-binary labels: {unique_pred}")
+    
+    # Compute accuracy
     accuracy = accuracy_score(y_true, y_pred)
-    precision = precision_score(y_true, y_pred, zero_division=0)
-    recall = recall_score(y_true, y_pred, zero_division=0)
-    f1 = f1_score(y_true, y_pred, zero_division=0)
+    
+    # Compute binary metrics (pos_label=1 for hallucination)
+    precision_binary = precision_score(y_true, y_pred, average='binary', pos_label=1, zero_division=0)
+    recall_binary = recall_score(y_true, y_pred, average='binary', pos_label=1, zero_division=0)
+    f1_binary = f1_score(y_true, y_pred, average='binary', pos_label=1, zero_division=0)
+    
+    # Compute macro averages (handles class imbalance better)
+    precision_macro = precision_score(y_true, y_pred, average='macro', zero_division=0)
+    recall_macro = recall_score(y_true, y_pred, average='macro', zero_division=0)
+    f1_macro = f1_score(y_true, y_pred, average='macro', zero_division=0)
+    
+    # Compute weighted averages
+    precision_weighted = precision_score(y_true, y_pred, average='weighted', zero_division=0)
+    recall_weighted = recall_score(y_true, y_pred, average='weighted', zero_division=0)
+    f1_weighted = f1_score(y_true, y_pred, average='weighted', zero_division=0)
+    
+    # Per-class metrics
+    precision_per_class = precision_score(y_true, y_pred, average=None, zero_division=0)
+    recall_per_class = recall_score(y_true, y_pred, average=None, zero_division=0)
+    f1_per_class = f1_score(y_true, y_pred, average=None, zero_division=0)
     
     metrics = {
-        'accuracy': accuracy,
-        'precision': precision,
-        'recall': recall,
-        'f1_score': f1
+        'accuracy': float(accuracy),
+        # Binary metrics (pos_label=1)
+        'precision': float(precision_binary),
+        'recall': float(recall_binary),
+        'f1_score': float(f1_binary),
+        # Macro averages
+        'precision_macro': float(precision_macro),
+        'recall_macro': float(recall_macro),
+        'f1_macro': float(f1_macro),
+        # Weighted averages
+        'precision_weighted': float(precision_weighted),
+        'recall_weighted': float(recall_weighted),
+        'f1_weighted': float(f1_weighted),
+        # Per-class metrics
+        'precision_per_class': {
+            'correct': float(precision_per_class[0]) if len(precision_per_class) > 0 else 0.0,
+            'hallucination': float(precision_per_class[1]) if len(precision_per_class) > 1 else 0.0
+        },
+        'recall_per_class': {
+            'correct': float(recall_per_class[0]) if len(recall_per_class) > 0 else 0.0,
+            'hallucination': float(recall_per_class[1]) if len(recall_per_class) > 1 else 0.0
+        },
+        'f1_per_class': {
+            'correct': float(f1_per_class[0]) if len(f1_per_class) > 0 else 0.0,
+            'hallucination': float(f1_per_class[1]) if len(f1_per_class) > 1 else 0.0
+        }
     }
     
     return metrics
@@ -252,9 +308,17 @@ def plot_metrics_comparison(
         save_path: Path to save the plot
         title: Plot title
     """
+    # Filter to only include scalar metrics (not nested dicts)
+    scalar_metrics = {
+        'accuracy': metrics.get('accuracy', 0.0),
+        'precision': metrics.get('precision', 0.0),
+        'recall': metrics.get('recall', 0.0),
+        'f1_score': metrics.get('f1_score', 0.0)
+    }
+    
     # Extract metric names and values
-    metric_names = list(metrics.keys())
-    metric_values = [metrics[name] for name in metric_names]
+    metric_names = list(scalar_metrics.keys())
+    metric_values = [scalar_metrics[name] for name in metric_names]
     
     # Create figure
     plt.figure(figsize=(10, 6))
@@ -456,10 +520,31 @@ def evaluate_model(
     print("-" * 70)
     metrics = compute_metrics(y_true, y_pred)
     
-    print(f"\nAccuracy:  {metrics['accuracy']:.4f}")
-    print(f"Precision: {metrics['precision']:.4f}")
-    print(f"Recall:    {metrics['recall']:.4f}")
-    print(f"F1-Score:  {metrics['f1_score']:.4f}")
+    print(f"\nOverall Metrics (Binary - pos_label=1):")
+    print(f"  Accuracy:  {metrics['accuracy']:.4f}")
+    print(f"  Precision: {metrics['precision']:.4f}")
+    print(f"  Recall:    {metrics['recall']:.4f}")
+    print(f"  F1-Score:  {metrics['f1_score']:.4f}")
+    
+    print(f"\nMacro Averages:")
+    print(f"  Precision: {metrics['precision_macro']:.4f}")
+    print(f"  Recall:    {metrics['recall_macro']:.4f}")
+    print(f"  F1-Score:  {metrics['f1_macro']:.4f}")
+    
+    print(f"\nWeighted Averages:")
+    print(f"  Precision: {metrics['precision_weighted']:.4f}")
+    print(f"  Recall:    {metrics['recall_weighted']:.4f}")
+    print(f"  F1-Score:  {metrics['f1_weighted']:.4f}")
+    
+    print(f"\nPer-Class Metrics:")
+    print(f"  Correct:")
+    print(f"    Precision: {metrics['precision_per_class']['correct']:.4f}")
+    print(f"    Recall:    {metrics['recall_per_class']['correct']:.4f}")
+    print(f"    F1-Score:  {metrics['f1_per_class']['correct']:.4f}")
+    print(f"  Hallucination:")
+    print(f"    Precision: {metrics['precision_per_class']['hallucination']:.4f}")
+    print(f"    Recall:    {metrics['recall_per_class']['hallucination']:.4f}")
+    print(f"    F1-Score:  {metrics['f1_per_class']['hallucination']:.4f}")
     
     # Print classification report
     print("\n" + "-" * 70)
@@ -472,17 +557,27 @@ def evaluate_model(
     print("Generating Visualizations")
     print("-" * 70)
     
-    # Confusion matrix
+    # Create figs subdirectory for paper figures
+    figs_dir = os.path.join(output_dir, "figs")
+    os.makedirs(figs_dir, exist_ok=True)
+    
+    # Confusion matrix (save to both locations)
     cm_path = os.path.join(output_dir, "confusion_matrix.png")
+    cm_path_figs = os.path.join(figs_dir, "confusion_matrix.png")
     plot_confusion_matrix(y_true, y_pred, cm_path)
+    plot_confusion_matrix(y_true, y_pred, cm_path_figs)
     
-    # ROC curve
+    # ROC curve (save to both locations)
     roc_path = os.path.join(output_dir, "roc_curve.png")
+    roc_path_figs = os.path.join(figs_dir, "roc_curve.png")
     plot_roc_curve(y_true, y_pred_proba, roc_path)
+    plot_roc_curve(y_true, y_pred_proba, roc_path_figs)
     
-    # Metrics comparison
+    # Metrics comparison (save to both locations)
     metrics_path = os.path.join(output_dir, "metrics_comparison.png")
+    metrics_path_figs = os.path.join(figs_dir, "metrics_comparison.png")
     plot_metrics_comparison(metrics, metrics_path)
+    plot_metrics_comparison(metrics, metrics_path_figs)
     
     # Step 5: Sample outputs
     print("\n" + "-" * 70)

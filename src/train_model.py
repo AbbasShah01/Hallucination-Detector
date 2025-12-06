@@ -462,10 +462,17 @@ def plot_training_history(history, output_dir="results"):
     
     plt.tight_layout()
     
-    # Save plots
+    # Create figs subdirectory for paper figures
+    figs_dir = os.path.join(output_dir, "figs")
+    os.makedirs(figs_dir, exist_ok=True)
+    
+    # Save plots (to both locations)
     loss_plot_path = os.path.join(output_dir, "training_loss_accuracy.png")
+    loss_plot_path_figs = os.path.join(figs_dir, "training_loss_accuracy.png")
     plt.savefig(loss_plot_path, dpi=300, bbox_inches='tight')
+    plt.savefig(loss_plot_path_figs, dpi=300, bbox_inches='tight')
     print(f"\nTraining plots saved to {loss_plot_path}")
+    plt.close()
     
     # Create additional plot for precision, recall, F1
     fig, ax = plt.subplots(1, 1, figsize=(10, 6))
@@ -482,8 +489,11 @@ def plot_training_history(history, output_dir="results"):
     plt.tight_layout()
     
     metrics_plot_path = os.path.join(output_dir, "validation_metrics.png")
+    metrics_plot_path_figs = os.path.join(figs_dir, "validation_metrics.png")
     plt.savefig(metrics_plot_path, dpi=300, bbox_inches='tight')
+    plt.savefig(metrics_plot_path_figs, dpi=300, bbox_inches='tight')
     print(f"Validation metrics plot saved to {metrics_plot_path}")
+    plt.close()
     
     plt.close('all')
 
