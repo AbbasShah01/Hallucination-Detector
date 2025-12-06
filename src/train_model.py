@@ -20,6 +20,34 @@ from pathlib import Path
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
+# Import global label constants
+try:
+    from constants import (
+        LABEL_CORRECT, LABEL_HALLUCINATION, LABELS, POS_LABEL,
+        MIN_TEST_SIZE, MIN_SAMPLES_PER_CLASS, DEMO_MODE,
+        validate_labels, get_label_name
+    )
+except ImportError:
+    # Fallback if constants not available
+    LABEL_CORRECT = 0
+    LABEL_HALLUCINATION = 1
+    LABELS = [0, 1]
+    POS_LABEL = 1
+    MIN_TEST_SIZE = 30
+    MIN_SAMPLES_PER_CLASS = 5
+    DEMO_MODE = False
+    
+    def validate_labels(labels, context=""):
+        labels = np.asarray(labels, dtype=int).ravel()
+        unique_labels = set(np.unique(labels))
+        if not unique_labels.issubset(set(LABELS)):
+            raise ValueError(f"{context}: Invalid labels: {unique_labels}")
+        if len(unique_labels) < 2:
+            raise ValueError(f"{context}: Missing classes. Found: {unique_labels}, need: {set(LABELS)}")
+    
+    def get_label_name(label):
+        return "Correct" if label == 0 else "Hallucination"
+
 
 class HallucinationDataset(Dataset):
     """
@@ -99,44 +127,134 @@ def load_tokenizer(tokenizer_path="data/preprocessed/tokenizer"):
     return AutoTokenizer.from_pretrained(tokenizer_path)
 
 
-def split_data(tokenized_data, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, random_seed=42):
+def split_data(tokenized_data, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, random_seed=42, demo_mode=None):
     """
-    Split data into train, validation, and test sets.
+    Split data into train, validation, and test sets using STRATIFIED splitting
+    to ensure both classes are represented in each split.
+    
+    HARD REQUIREMENTS:
+    - Uses stratified splitting (MANDATORY)
+    - Both classes (0 and 1) MUST exist in train/val/test
+    - Test set MUST have >= MIN_TEST_SIZE samples (unless demo_mode=True)
+    - Raises ValueError if requirements not met (NO silent continuation)
     
     Args:
-        tokenized_data: List of all tokenized samples
+        tokenized_data: List of all tokenized samples (must have 'label' key)
         train_ratio: Proportion of data for training
         val_ratio: Proportion of data for validation
         test_ratio: Proportion of data for testing
         random_seed: Random seed for reproducibility
+        demo_mode: If True, allows smaller test sets. If None, uses global DEMO_MODE.
     
     Returns:
         Tuple of (train_data, val_data, test_data)
+    
+    Raises:
+        ValueError: If splitting requirements are not met
     """
+    from sklearn.model_selection import train_test_split
+    
+    if demo_mode is None:
+        demo_mode = DEMO_MODE
+    
     # Validate ratios
     assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, "Ratios must sum to 1.0"
     
     # Set random seed for reproducibility
     np.random.seed(random_seed)
     
-    # Shuffle data
-    indices = np.random.permutation(len(tokenized_data))
-    tokenized_data = [tokenized_data[i] for i in indices]
+    # Extract labels for stratified splitting
+    labels = np.array([sample['label'] for sample in tokenized_data])
     
-    # Calculate split indices
+    # HARD CHECK: Validate labels conform to global contract
+    validate_labels(labels, context="split_data: input data")
+    
+    # HARD CHECK: Ensure both classes exist in original data
+    unique_labels = set(labels)
+    if unique_labels != set(LABELS):
+        raise ValueError(
+            f"split_data: Original data must contain both classes {LABELS}. "
+            f"Found: {unique_labels}. Cannot perform binary classification."
+        )
+    
     n_total = len(tokenized_data)
-    n_train = int(n_total * train_ratio)
-    n_val = int(n_total * val_ratio)
     
-    # Split data
-    train_data = tokenized_data[:n_train]
-    val_data = tokenized_data[n_train:n_train + n_val]
-    test_data = tokenized_data[n_train + n_val:]
+    # First split: separate test set (stratified)
+    train_val_data, test_data, train_val_labels, test_labels = train_test_split(
+        tokenized_data, labels,
+        test_size=test_ratio,
+        random_state=random_seed,
+        stratify=labels,  # STRATIFIED (MANDATORY)
+        shuffle=True
+    )
     
-    print(f"\nData split:")
+    # HARD CHECK: Test set size
+    if not demo_mode and len(test_data) < MIN_TEST_SIZE:
+        raise ValueError(
+            f"split_data: Test set has only {len(test_data)} samples. "
+            f"Minimum required: {MIN_TEST_SIZE} (unless demo_mode=True). "
+            f"Current dataset size: {n_total}. Consider using a larger dataset."
+        )
+    
+    # HARD CHECK: Both classes in test set
+    test_labels_array = np.array([s['label'] for s in test_data])
+    validate_labels(test_labels_array, context="split_data: test set")
+    
+    # Count samples per class in test set
+    test_class_counts = {label: np.sum(test_labels_array == label) for label in LABELS}
+    if not demo_mode:
+        for label in LABELS:
+            if test_class_counts[label] < MIN_SAMPLES_PER_CLASS:
+                raise ValueError(
+                    f"split_data: Test set has only {test_class_counts[label]} samples of class {label}. "
+                    f"Minimum required per class: {MIN_SAMPLES_PER_CLASS} (unless demo_mode=True)."
+                )
+    
+    # Second split: separate train and validation (stratified)
+    val_size = val_ratio / (train_ratio + val_ratio)
+    train_data, val_data, train_labels, val_labels = train_test_split(
+        train_val_data, train_val_labels,
+        test_size=val_size,
+        random_state=random_seed,
+        stratify=train_val_labels,  # STRATIFIED (MANDATORY)
+        shuffle=True
+    )
+    
+    # HARD CHECK: Both classes in train and val sets
+    train_labels_array = np.array([s['label'] for s in train_data])
+    val_labels_array = np.array([s['label'] for s in val_data])
+    validate_labels(train_labels_array, context="split_data: train set")
+    validate_labels(val_labels_array, context="split_data: validation set")
+    
+    # Log class distribution in each split
+    def count_classes(data):
+        labels_arr = np.array([s['label'] for s in data])
+        return {label: np.sum(labels_arr == label) for label in LABELS}
+    
+    train_counts = count_classes(train_data)
+    val_counts = count_classes(val_data)
+    test_counts = count_classes(test_data)
+    
+    print(f"\n{'='*70}")
+    print(f"DATA SPLIT (STRATIFIED) - VERIFICATION")
+    print(f"{'='*70}")
+    print(f"Total samples: {n_total}")
     print(f"  Training: {len(train_data)} samples ({len(train_data)/n_total*100:.1f}%)")
+    print(f"    Class {LABEL_CORRECT} ({get_label_name(LABEL_CORRECT)}): {train_counts[LABEL_CORRECT]}")
+    print(f"    Class {LABEL_HALLUCINATION} ({get_label_name(LABEL_HALLUCINATION)}): {train_counts[LABEL_HALLUCINATION]}")
     print(f"  Validation: {len(val_data)} samples ({len(val_data)/n_total*100:.1f}%)")
+    print(f"    Class {LABEL_CORRECT} ({get_label_name(LABEL_CORRECT)}): {val_counts[LABEL_CORRECT]}")
+    print(f"    Class {LABEL_HALLUCINATION} ({get_label_name(LABEL_HALLUCINATION)}): {val_counts[LABEL_HALLUCINATION]}")
     print(f"  Test: {len(test_data)} samples ({len(test_data)/n_total*100:.1f}%)")
+    print(f"    Class {LABEL_CORRECT} ({get_label_name(LABEL_CORRECT)}): {test_counts[LABEL_CORRECT]}")
+    print(f"    Class {LABEL_HALLUCINATION} ({get_label_name(LABEL_HALLUCINATION)}): {test_counts[LABEL_HALLUCINATION]}")
+    
+    if demo_mode:
+        print(f"\n[WARNING] DEMO MODE: Test set size ({len(test_data)}) is below recommended minimum ({MIN_TEST_SIZE})")
+        print("   Results may not be statistically reliable.")
+    else:
+        print(f"\n[OK] All splits verified: Both classes present, test size >= {MIN_TEST_SIZE}")
+    print(f"{'='*70}\n")
     
     return train_data, val_data, test_data
 
@@ -255,6 +373,18 @@ def train_epoch(model, train_loader, optimizer, scheduler, device, criterion):
     avg_loss = total_loss / len(train_loader)
     accuracy = accuracy_score(all_labels, all_predictions)
     
+    # Log prediction distribution for verification
+    all_labels_arr = np.array(all_labels)
+    all_predictions_arr = np.array(all_predictions)
+    unique_preds, pred_counts = np.unique(all_predictions_arr, return_counts=True)
+    
+    # Verify labels conform to contract
+    try:
+        validate_labels(all_labels_arr, context="train_epoch: training labels")
+        validate_labels(all_predictions_arr, context="train_epoch: training predictions")
+    except ValueError as e:
+        print(f"[WARNING] in train_epoch: {e}")
+    
     return avg_loss, accuracy
 
 
@@ -306,9 +436,29 @@ def validate_epoch(model, val_loader, device, criterion):
     # Calculate metrics
     avg_loss = total_loss / len(val_loader)
     accuracy = accuracy_score(all_labels, all_predictions)
-    precision = precision_score(all_labels, all_predictions, average='binary', zero_division=0)
-    recall = recall_score(all_labels, all_predictions, average='binary', zero_division=0)
-    f1 = f1_score(all_labels, all_predictions, average='binary', zero_division=0)
+    
+    # Use global label constants
+    precision = precision_score(all_labels, all_predictions, average='binary', pos_label=POS_LABEL, zero_division=0)
+    recall = recall_score(all_labels, all_predictions, average='binary', pos_label=POS_LABEL, zero_division=0)
+    f1 = f1_score(all_labels, all_predictions, average='binary', pos_label=POS_LABEL, zero_division=0)
+    
+    # Verify labels and check for constant validation accuracy (warning sign)
+    all_labels_arr = np.array(all_labels)
+    all_predictions_arr = np.array(all_predictions)
+    
+    try:
+        validate_labels(all_labels_arr, context="validate_epoch: validation labels")
+        validate_labels(all_predictions_arr, context="validate_epoch: validation predictions")
+    except ValueError as e:
+        print(f"[WARNING] in validate_epoch: {e}")
+    
+    # Warning if validation accuracy is suspiciously constant or near 0.5
+    if abs(accuracy - 0.5) < 0.01:
+        print(f"[WARNING] Validation accuracy is {accuracy:.4f} (near 0.5).")
+        print("   Possible causes:")
+        print("   - Model not learning (check learning rate, loss decreasing)")
+        print("   - Class imbalance in validation set")
+        print("   - Random predictions")
     
     return avg_loss, accuracy, precision, recall, f1
 

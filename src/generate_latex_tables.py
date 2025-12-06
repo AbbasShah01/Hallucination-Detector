@@ -1,10 +1,26 @@
 """
 Generate LaTeX tables from evaluation metrics for IEEE paper.
+Uses global label constants to ensure consistency.
 """
 
 import json
 import os
 from typing import Dict, List, Optional
+
+# Import global label constants
+try:
+    from constants import (
+        LABEL_CORRECT, LABEL_HALLUCINATION, LABELS,
+        get_label_name
+    )
+except ImportError:
+    # Fallback if constants not available
+    LABEL_CORRECT = 0
+    LABEL_HALLUCINATION = 1
+    LABELS = [0, 1]
+    
+    def get_label_name(label):
+        return "Correct" if label == 0 else "Hallucination"
 
 
 def generate_overall_metrics_table(metrics: Dict, output_path: Optional[str] = None) -> str:
@@ -18,30 +34,20 @@ def generate_overall_metrics_table(metrics: Dict, output_path: Optional[str] = N
     Returns:
         LaTeX table code as string
     """
-    latex = """\\begin{table}[h]
-  \\centering
-  \\caption{Overall Classification Metrics}
-  \\label{tab:overall-metrics}
-  \\begin{tabular}{lcccc}
-    \\hline
-    Metric & Accuracy & Precision & Recall & F1-score \\\\ \\hline
-    Binary (pos=1) & {:.4f} & {:.4f} & {:.4f} & {:.4f} \\\\
-    Macro Average & {:.4f} & {:.4f} & {:.4f} & {:.4f} \\\\
-    Weighted Average & {:.4f} & {:.4f} & {:.4f} & {:.4f} \\\\ \\hline
-  \\end{{tabular}}
-\\end{{table}}""".format(
-        metrics['accuracy'],
-        metrics['precision'],
-        metrics['recall'],
-        metrics['f1_score'],
-        metrics['accuracy'],
-        metrics['precision_macro'],
-        metrics['recall_macro'],
-        metrics['f1_macro'],
-        metrics['accuracy'],
-        metrics['precision_weighted'],
-        metrics['recall_weighted'],
-        metrics['f1_weighted']
+    # Use string formatting with proper escaping
+    latex = (
+        "\\begin{table}[h]\n"
+        "  \\centering\n"
+        "  \\caption{Overall Classification Metrics}\n"
+        "  \\label{tab:overall-metrics}\n"
+        "  \\begin{tabular}{lcccc}\n"
+        "    \\hline\n"
+        "    Metric & Accuracy & Precision & Recall & F1-score \\\\ \\hline\n"
+        f"    Binary (pos=1) & {metrics['accuracy']:.4f} & {metrics['precision']:.4f} & {metrics['recall']:.4f} & {metrics['f1_score']:.4f} \\\\\n"
+        f"    Macro Average & {metrics['accuracy']:.4f} & {metrics['precision_macro']:.4f} & {metrics['recall_macro']:.4f} & {metrics['f1_macro']:.4f} \\\\\n"
+        f"    Weighted Average & {metrics['accuracy']:.4f} & {metrics['precision_weighted']:.4f} & {metrics['recall_weighted']:.4f} & {metrics['f1_weighted']:.4f} \\\\ \\hline\n"
+        "  \\end{tabular}\n"
+        "\\end{table}"
     )
     
     if output_path:
@@ -65,29 +71,46 @@ def generate_per_class_metrics_table(metrics: Dict, confusion_matrix: Dict, outp
     Returns:
         LaTeX table code as string
     """
-    # Calculate support from confusion matrix
+    # Extract per-class metrics (ensuring both classes are present)
+    precision_per_class = metrics.get('precision_per_class', {})
+    recall_per_class = metrics.get('recall_per_class', {})
+    f1_per_class = metrics.get('f1_per_class', {})
+    support_per_class = metrics.get('support_per_class', {})
+    
+    # Use global label constants to ensure correct mapping
+    prec_correct = precision_per_class.get('correct', 0.0)
+    prec_hallucination = precision_per_class.get('hallucination', 0.0)
+    rec_correct = recall_per_class.get('correct', 0.0)
+    rec_hallucination = recall_per_class.get('hallucination', 0.0)
+    f1_correct = f1_per_class.get('correct', 0.0)
+    f1_hallucination = f1_per_class.get('hallucination', 0.0)
+    
+    # Calculate support from confusion matrix (more reliable)
     support_correct = confusion_matrix.get('true_negative', 0) + confusion_matrix.get('false_positive', 0)
     support_hallucination = confusion_matrix.get('true_positive', 0) + confusion_matrix.get('false_negative', 0)
     
-    latex = """\\begin{table}[h]
-  \\centering
-  \\caption{Per-Class Classification Metrics}
-  \\label{tab:per-class-metrics}
-  \\begin{tabular}{lcccc}
-    \\hline
-    Class & Precision & Recall & F1-score & Support \\\\ \\hline
-    Correct & {:.4f} & {:.4f} & {:.4f} & {} \\\\
-    Hallucination & {:.4f} & {:.4f} & {:.4f} & {} \\\\ \\hline
-  \\end{{tabular}}
-\\end{{table}}""".format(
-        metrics['precision_per_class']['correct'],
-        metrics['recall_per_class']['correct'],
-        metrics['f1_per_class']['correct'],
-        support_correct,
-        metrics['precision_per_class']['hallucination'],
-        metrics['recall_per_class']['hallucination'],
-        metrics['f1_per_class']['hallucination'],
-        support_hallucination
+    # Use support from metrics if available, otherwise from confusion matrix
+    if support_per_class.get('correct', 0) > 0:
+        support_correct = support_per_class.get('correct', support_correct)
+    if support_per_class.get('hallucination', 0) > 0:
+        support_hallucination = support_per_class.get('hallucination', support_hallucination)
+    
+    # HARD CHECK: Both classes must have metrics
+    if prec_correct == 0.0 and prec_hallucination == 0.0:
+        raise ValueError("generate_per_class_metrics_table: Both classes have zero precision. Check evaluation metrics.")
+    
+    latex = (
+        "\\begin{table}[h]\n"
+        "  \\centering\n"
+        "  \\caption{Per-Class Classification Metrics}\n"
+        "  \\label{tab:per-class-metrics}\n"
+        "  \\begin{tabular}{lcccc}\n"
+        "    \\hline\n"
+        "    Class & Precision & Recall & F1-score & Support \\\\ \\hline\n"
+        f"    {get_label_name(LABEL_CORRECT)} & {prec_correct:.4f} & {rec_correct:.4f} & {f1_correct:.4f} & {support_correct} \\\\\n"
+        f"    {get_label_name(LABEL_HALLUCINATION)} & {prec_hallucination:.4f} & {rec_hallucination:.4f} & {f1_hallucination:.4f} & {support_hallucination} \\\\ \\hline\n"
+        "  \\end{tabular}\n"
+        "\\end{table}"
     )
     
     if output_path:
@@ -115,19 +138,30 @@ def generate_confusion_matrix_table(confusion_matrix: Dict, output_path: Optiona
     fn = confusion_matrix.get('false_negative', 0)
     tp = confusion_matrix.get('true_positive', 0)
     
-    latex = """\\begin{table}[h]
-  \\centering
-  \\caption{Confusion Matrix}
-  \\label{tab:confusion-matrix}
-  \\begin{tabular}{l|cc}
-    \\hline
-    & \\multicolumn{{2}}{{c}}{{Predicted}} \\\\
-    \\cline{{2-3}}
-    Actual & Correct & Hallucination \\\\ \\hline
-    Correct & {} & {} \\\\
-    Hallucination & {} & {} \\\\ \\hline
-  \\end{{tabular}}
-\\end{{table}}""".format(tn, fp, fn, tp)
+    # HARD CHECK: All values must be non-negative integers
+    if any(v < 0 for v in [tn, fp, fn, tp]):
+        raise ValueError(f"generate_confusion_matrix_table: Negative values in confusion matrix: TN={tn}, FP={fp}, FN={fn}, TP={tp}")
+    
+    # Verify sum matches total samples (if available)
+    total = tn + fp + fn + tp
+    if total == 0:
+        raise ValueError("generate_confusion_matrix_table: Confusion matrix is empty (all zeros)")
+    
+    latex = (
+        "\\begin{table}[h]\n"
+        "  \\centering\n"
+        "  \\caption{Confusion Matrix}\n"
+        "  \\label{tab:confusion-matrix}\n"
+        "  \\begin{tabular}{l|cc}\n"
+        "    \\hline\n"
+        "    & \\multicolumn{2}{c}{Predicted} \\\\\n"
+        "    \\cline{2-3}\n"
+        f"    Actual & {get_label_name(LABEL_CORRECT)} & {get_label_name(LABEL_HALLUCINATION)} \\\\ \\hline\n"
+        f"    {get_label_name(LABEL_CORRECT)} & {tn} & {fp} \\\\\n"
+        f"    {get_label_name(LABEL_HALLUCINATION)} & {fn} & {tp} \\\\ \\hline\n"
+        "  \\end{tabular}\n"
+        "\\end{table}"
+    )
     
     if output_path:
         os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)

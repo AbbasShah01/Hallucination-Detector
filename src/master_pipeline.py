@@ -182,6 +182,15 @@ class MasterPipeline:
         else:
             self.config = self._default_config()
         
+        # Set DEMO_MODE from config BEFORE other modules import constants
+        demo_mode = self.config.get("demo_mode", False)
+        try:
+            import constants
+            constants.DEMO_MODE = demo_mode
+            self.logger.info(f"Demo mode set to {demo_mode} from config")
+        except ImportError:
+            pass
+        
         # Initialize components
         self.model = None
         self.tokenizer = None
@@ -275,13 +284,15 @@ class MasterPipeline:
         try:
             train_config = self.config["training"]
             
-            # Split data
+            # Split data (with demo_mode from config if available)
             self.logger.info("Splitting data into train/val/test sets...")
+            demo_mode = self.config.get("demo_mode", False)
             train_data, val_data, test_data = split_data(
                 tokenized_data,
                 train_ratio=train_config["train_ratio"],
                 val_ratio=train_config["val_ratio"],
-                test_ratio=train_config["test_ratio"]
+                test_ratio=train_config["test_ratio"],
+                demo_mode=demo_mode
             )
             
             # Create data loaders
@@ -526,6 +537,14 @@ class MasterPipeline:
                 threshold=self.config["fusion"]["threshold"],
                 num_samples=self.config["evaluation"]["num_samples"]
             )
+            # Update DEMO_MODE in constants before evaluation (in case it changed)
+            demo_mode = self.config.get("demo_mode", False)
+            try:
+                import constants
+                constants.DEMO_MODE = demo_mode
+            except ImportError:
+                pass
+            
             self.logger.info("[OK] Evaluation completed")
         except Exception as e:
             self.logger.error(f"Evaluation error: {e}")

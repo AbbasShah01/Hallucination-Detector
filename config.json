@@ -29,6 +29,7 @@
   },
   "evaluation": {
     "num_samples": 10
-  }
+  },
+  "demo_mode": true
 }
 

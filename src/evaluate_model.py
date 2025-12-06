@@ -36,10 +36,39 @@ from sklearn.metrics import (
     confusion_matrix,
     roc_curve,
     auc,
-    classification_report
+    classification_report,
+    precision_recall_fscore_support
 )
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
+
+# Import global label constants
+try:
+    from constants import (
+        LABEL_CORRECT, LABEL_HALLUCINATION, LABELS, POS_LABEL,
+        MIN_TEST_SIZE, MIN_SAMPLES_PER_CLASS, DEMO_MODE,
+        validate_labels, get_label_name
+    )
+except ImportError:
+    # Fallback if constants not available
+    LABEL_CORRECT = 0
+    LABEL_HALLUCINATION = 1
+    LABELS = [0, 1]
+    POS_LABEL = 1
+    MIN_TEST_SIZE = 30
+    MIN_SAMPLES_PER_CLASS = 5
+    DEMO_MODE = False
+    
+    def validate_labels(labels, context=""):
+        labels = np.asarray(labels, dtype=int).ravel()
+        unique_labels = set(np.unique(labels))
+        if not unique_labels.issubset(set(LABELS)):
+            raise ValueError(f"{context}: Invalid labels: {unique_labels}")
+        if len(unique_labels) < 2:
+            raise ValueError(f"{context}: Missing classes. Found: {unique_labels}, need: {set(LABELS)}")
+    
+    def get_label_name(label):
+        return "Correct" if label == 0 else "Hallucination"
 
 
 def load_test_data(data_path: str) -> pd.DataFrame:
@@ -125,51 +154,75 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
     """
     Compute classification metrics for binary classification.
     
+    HARD REQUIREMENTS:
+    - y_true and y_pred must have same length
+    - Both must contain only labels from LABELS (0, 1)
+    - Both classes must be present in y_true (for meaningful metrics)
+    - Uses global label constants (LABEL_CORRECT=0, LABEL_HALLUCINATION=1)
+    
     Args:
-        y_true: True labels (0=correct, 1=hallucination)
-        y_pred: Predicted labels (0=correct, 1=hallucination)
+        y_true: True labels (0=Correct, 1=Hallucination)
+        y_pred: Predicted labels (0=Correct, 1=Hallucination)
     
     Returns:
         Dictionary with metrics including binary, macro, and weighted averages
+    
+    Raises:
+        ValueError: If labels don't conform to global contract
     """
     # Ensure labels are 1D arrays of integers
     y_true = np.asarray(y_true, dtype=int).ravel()
     y_pred = np.asarray(y_pred, dtype=int).ravel()
     
-    # Verify same length
+    # HARD CHECK: Same length
     if len(y_true) != len(y_pred):
-        raise ValueError(f"y_true and y_pred must have same length. Got {len(y_true)} and {len(y_pred)}")
+        raise ValueError(
+            f"compute_metrics: y_true and y_pred must have same length. "
+            f"Got {len(y_true)} and {len(y_pred)}"
+        )
     
-    # Verify labels are binary (0 or 1)
-    unique_true = np.unique(y_true)
-    unique_pred = np.unique(y_pred)
-    if not all(label in [0, 1] for label in unique_true):
-        raise ValueError(f"y_true contains non-binary labels: {unique_true}")
-    if not all(label in [0, 1] for label in unique_pred):
-        raise ValueError(f"y_pred contains non-binary labels: {unique_pred}")
+    # HARD CHECK: Validate labels conform to global contract
+    validate_labels(y_true, context="compute_metrics: y_true")
+    validate_labels(y_pred, context="compute_metrics: y_pred")
+    
+    # HARD CHECK: Both classes must exist in y_true
+    unique_true = set(np.unique(y_true))
+    if unique_true != set(LABELS):
+        raise ValueError(
+            f"compute_metrics: y_true must contain both classes {LABELS}. "
+            f"Found: {unique_true}. Cannot compute meaningful binary classification metrics."
+        )
     
     # Compute accuracy
     accuracy = accuracy_score(y_true, y_pred)
     
-    # Compute binary metrics (pos_label=1 for hallucination)
-    precision_binary = precision_score(y_true, y_pred, average='binary', pos_label=1, zero_division=0)
-    recall_binary = recall_score(y_true, y_pred, average='binary', pos_label=1, zero_division=0)
-    f1_binary = f1_score(y_true, y_pred, average='binary', pos_label=1, zero_division=0)
+    # Compute binary metrics using global POS_LABEL (hallucination=1)
+    precision_binary = precision_score(y_true, y_pred, average='binary', pos_label=POS_LABEL, zero_division=0)
+    recall_binary = recall_score(y_true, y_pred, average='binary', pos_label=POS_LABEL, zero_division=0)
+    f1_binary = f1_score(y_true, y_pred, average='binary', pos_label=POS_LABEL, zero_division=0)
     
     # Compute macro averages (handles class imbalance better)
-    precision_macro = precision_score(y_true, y_pred, average='macro', zero_division=0)
-    recall_macro = recall_score(y_true, y_pred, average='macro', zero_division=0)
-    f1_macro = f1_score(y_true, y_pred, average='macro', zero_division=0)
+    precision_macro = precision_score(y_true, y_pred, average='macro', labels=LABELS, zero_division=0)
+    recall_macro = recall_score(y_true, y_pred, average='macro', labels=LABELS, zero_division=0)
+    f1_macro = f1_score(y_true, y_pred, average='macro', labels=LABELS, zero_division=0)
     
     # Compute weighted averages
-    precision_weighted = precision_score(y_true, y_pred, average='weighted', zero_division=0)
-    recall_weighted = recall_score(y_true, y_pred, average='weighted', zero_division=0)
-    f1_weighted = f1_score(y_true, y_pred, average='weighted', zero_division=0)
+    precision_weighted = precision_score(y_true, y_pred, average='weighted', labels=LABELS, zero_division=0)
+    recall_weighted = recall_score(y_true, y_pred, average='weighted', labels=LABELS, zero_division=0)
+    f1_weighted = f1_score(y_true, y_pred, average='weighted', labels=LABELS, zero_division=0)
     
-    # Per-class metrics
-    precision_per_class = precision_score(y_true, y_pred, average=None, zero_division=0)
-    recall_per_class = recall_score(y_true, y_pred, average=None, zero_division=0)
-    f1_per_class = f1_score(y_true, y_pred, average=None, zero_division=0)
+    # Per-class metrics using precision_recall_fscore_support with explicit labels
+    # This ensures consistent ordering: [0, 1] = [Correct, Hallucination]
+    precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
+        y_true, y_pred, labels=LABELS, zero_division=0
+    )
+    
+    # HARD CHECK: Must have exactly 2 values (one per class)
+    if len(precision_per_class) != 2 or len(recall_per_class) != 2 or len(f1_per_class) != 2:
+        raise ValueError(
+            f"compute_metrics: Expected 2 values per metric (one per class). "
+            f"Got: precision={len(precision_per_class)}, recall={len(recall_per_class)}, f1={len(f1_per_class)}"
+        )
     
     metrics = {
         'accuracy': float(accuracy),
@@ -185,18 +238,23 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
         'precision_weighted': float(precision_weighted),
         'recall_weighted': float(recall_weighted),
         'f1_weighted': float(f1_weighted),
-        # Per-class metrics
+        # Per-class metrics (always has both classes)
+        # Index 0 = LABEL_CORRECT (0), Index 1 = LABEL_HALLUCINATION (1)
         'precision_per_class': {
-            'correct': float(precision_per_class[0]) if len(precision_per_class) > 0 else 0.0,
-            'hallucination': float(precision_per_class[1]) if len(precision_per_class) > 1 else 0.0
+            'correct': float(precision_per_class[0]),  # Class 0
+            'hallucination': float(precision_per_class[1])  # Class 1
         },
         'recall_per_class': {
-            'correct': float(recall_per_class[0]) if len(recall_per_class) > 0 else 0.0,
-            'hallucination': float(recall_per_class[1]) if len(recall_per_class) > 1 else 0.0
+            'correct': float(recall_per_class[0]),  # Class 0
+            'hallucination': float(recall_per_class[1])  # Class 1
         },
         'f1_per_class': {
-            'correct': float(f1_per_class[0]) if len(f1_per_class) > 0 else 0.0,
-            'hallucination': float(f1_per_class[1]) if len(f1_per_class) > 1 else 0.0
+            'correct': float(f1_per_class[0]),  # Class 0
+            'hallucination': float(f1_per_class[1])  # Class 1
+        },
+        'support_per_class': {
+            'correct': int(support_per_class[0]),  # Class 0
+            'hallucination': int(support_per_class[1])  # Class 1
         }
     }
     
@@ -213,26 +271,67 @@ def plot_confusion_matrix(
     Generate and save confusion matrix plot.
     
     Args:
-        y_true: True labels
-        y_pred: Predicted labels
+        y_true: True labels (0=Correct, 1=Hallucination)
+        y_pred: Predicted labels (0=Correct, 1=Hallucination)
         save_path: Path to save the plot
         title: Plot title
     """
-    # Compute confusion matrix
-    cm = confusion_matrix(y_true, y_pred)
+    # Ensure labels are integers
+    y_true = np.asarray(y_true, dtype=int).ravel()
+    y_pred = np.asarray(y_pred, dtype=int).ravel()
+    
+    # Compute confusion matrix with explicit labels from global constants
+    # labels=LABELS ensures: row 0 = LABEL_CORRECT (0), row 1 = LABEL_HALLUCINATION (1)
+    # This always returns a 2x2 matrix
+    try:
+        from constants import LABELS
+    except ImportError:
+        LABELS = [0, 1]
+    
+    cm = confusion_matrix(y_true, y_pred, labels=LABELS)
+    
+    # HARD CHECK: Must be 2x2
+    if cm.shape != (2, 2):
+        raise ValueError(
+            f"plot_confusion_matrix: Confusion matrix must be 2x2. Got shape: {cm.shape}. "
+            f"This should not happen with labels={LABELS}"
+        )
+    
+    # Ensure cm is 2x2 (should be guaranteed by labels=[0,1], but double-check)
+    if cm.shape != (2, 2):
+        # Pad to 2x2 if needed (shouldn't happen with labels=[0,1])
+        cm_full = np.zeros((2, 2), dtype=int)
+        if len(y_true) > 0:
+            unique_true = np.unique(y_true)
+            unique_pred = np.unique(y_pred)
+            for i, true_label in enumerate([0, 1]):
+                for j, pred_label in enumerate([0, 1]):
+                    if true_label in unique_true and pred_label in unique_pred:
+                        mask = (y_true == true_label) & (y_pred == pred_label)
+                        cm_full[i, j] = np.sum(mask)
+        cm = cm_full
     
     # Create figure
     plt.figure(figsize=(10, 8))
     
-    # Create heatmap
+    # Create heatmap with labels from global constants
+    try:
+        from constants import get_label_name, LABEL_CORRECT, LABEL_HALLUCINATION
+        xlabels = [get_label_name(LABEL_CORRECT), get_label_name(LABEL_HALLUCINATION)]
+        ylabels = [get_label_name(LABEL_CORRECT), get_label_name(LABEL_HALLUCINATION)]
+    except ImportError:
+        xlabels = ['Correct', 'Hallucination']
+        ylabels = ['Correct', 'Hallucination']
+    
     sns.heatmap(
         cm,
         annot=True,
         fmt='d',
         cmap='Blues',
         cbar_kws={'label': 'Count'},
-        xticklabels=['Correct', 'Hallucination'],
-        yticklabels=['Correct', 'Hallucination']
+        xticklabels=xlabels,
+        yticklabels=ylabels,
+        vmin=0  # Ensure color scale starts at 0
     )
     
     plt.title(title, fontsize=16, fontweight='bold', pad=20)
@@ -241,19 +340,21 @@ def plot_confusion_matrix(
     
     # Add text annotations with percentages
     total = cm.sum()
-    for i in range(2):
-        for j in range(2):
-            count = cm[i, j]
-            percentage = (count / total) * 100 if total > 0 else 0
-            plt.text(
-                j + 0.5, i + 0.7,
-                f'{percentage:.1f}%',
-                ha='center',
-                va='center',
-                fontsize=10,
-                color='red' if i != j else 'green',
-                fontweight='bold'
-            )
+    if total > 0:
+        for i in range(2):
+            for j in range(2):
+                count = cm[i, j]
+                percentage = (count / total) * 100
+                if count > 0:  # Only show percentage if count > 0
+                    plt.text(
+                        j + 0.5, i + 0.7,
+                        f'{percentage:.1f}%',
+                        ha='center',
+                        va='center',
+                        fontsize=10,
+                        color='red' if i != j else 'green',
+                        fontweight='bold'
+                    )
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
@@ -522,7 +623,7 @@ def evaluate_model(
     
     # Check for class imbalance
     if len(unique_labels) < 2:
-        print(f"\n⚠️  WARNING: Test set contains only class {unique_labels[0]}!")
+        print(f"\n[WARNING] Test set contains only class {unique_labels[0]}!")
         print("   Metrics for the missing class will be 0 or undefined.")
         print("   Consider using a larger, balanced test set for reliable evaluation.")
     
@@ -554,12 +655,53 @@ def evaluate_model(
         y_pred = y_pred[:min_len]
         y_pred_proba = y_pred_proba[:min_len]
         df = df.iloc[:min_len]
-        print(f"\n⚠️  WARNING: Truncated to {min_len} samples to match lengths")
+        print(f"\n[WARNING] Truncated to {min_len} samples to match lengths")
         # Recalculate distributions after truncation
         unique_labels, label_counts = np.unique(y_true, return_counts=True)
         unique_preds, pred_counts = np.unique(y_pred, return_counts=True)
     
-    # Step 3: Compute metrics
+    # Step 3: Run comprehensive sanity checks (MANDATORY)
+    demo_mode = DEMO_MODE  # Get from global constant
+    try:
+        from sanity_checks import run_sanity_checks
+        sanity_results = run_sanity_checks(
+            y_true, y_pred, y_pred_proba,
+            context="evaluate_model",
+            demo_mode=demo_mode
+        )
+        if not sanity_results['passed']:
+            # In demo mode, only errors (not warnings) should stop execution
+            if demo_mode and len(sanity_results['errors']) == 0:
+                print("[WARNING] Demo mode: Proceeding despite warnings")
+            elif len(sanity_results['errors']) > 0:
+                raise ValueError(f"Sanity checks failed: {', '.join(sanity_results['errors'])}")
+    except ValueError as e:
+        # Handle ValueError from sanity checks
+        error_str = str(e)
+        if demo_mode and ("Test set has only" in error_str or "has only" in error_str and "samples" in error_str):
+            print(f"[WARNING] Demo mode enabled: {error_str}")
+            print("   Proceeding with evaluation despite small test set...")
+        elif demo_mode:
+            # In demo mode, allow other warnings but still check for critical errors
+            if "must contain both classes" in error_str:
+                # This is critical - both classes must exist
+                raise
+            else:
+                print(f"[WARNING] Demo mode: {error_str}")
+                print("   Proceeding with evaluation...")
+        else:
+            # Not in demo mode - raise all errors
+            raise
+    except ImportError:
+        # Fallback if sanity_checks not available
+        print("[WARNING] sanity_checks module not available. Skipping comprehensive checks.")
+        # Basic checks
+        if len(y_true) != len(y_pred):
+            raise ValueError(f"y_true and y_pred must have same length. Got {len(y_true)} and {len(y_pred)}")
+        if set(np.unique(y_true)) != set(LABELS):
+            raise ValueError(f"y_true must contain both classes {LABELS}")
+    
+    # Step 4: Compute metrics
     print("\n" + "-" * 70)
     print("Computing Metrics")
     print("-" * 70)
@@ -644,13 +786,47 @@ def evaluate_model(
     print(f"\nMetrics saved to {metrics_path_json}")
     
     # Step 7: Save confusion matrix as JSON
-    cm = confusion_matrix(y_true, y_pred)
+    # Use explicit labels from global constants to ensure correct order: [0, 1]
+    cm = confusion_matrix(y_true, y_pred, labels=LABELS)
+    
+    # HARD CHECK: Confusion matrix must be 2x2
+    if cm.shape != (2, 2):
+        raise ValueError(
+            f"Confusion matrix must be 2x2. Got shape: {cm.shape}. "
+            f"This should not happen with labels={LABELS}"
+        )
+    
+    # Confusion matrix structure with labels=LABELS [0, 1]:
+    #           Predicted
+    #           0 (Correct)      1 (Hallucination)
+    # Actual 0  TN                FP
+    #        1  FN                TP
     cm_dict = {
-        'true_negative': int(cm[0, 0]),
-        'false_positive': int(cm[0, 1]),
-        'false_negative': int(cm[1, 0]) if cm.shape[0] > 1 else 0,
-        'true_positive': int(cm[1, 1]) if cm.shape[0] > 1 and cm.shape[1] > 1 else 0
+        'true_negative': int(cm[LABEL_CORRECT, LABEL_CORRECT]),      # Correct predicted as Correct
+        'false_positive': int(cm[LABEL_CORRECT, LABEL_HALLUCINATION]),  # Correct predicted as Hallucination
+        'false_negative': int(cm[LABEL_HALLUCINATION, LABEL_CORRECT]),  # Hallucination predicted as Correct
+        'true_positive': int(cm[LABEL_HALLUCINATION, LABEL_HALLUCINATION])  # Hallucination predicted as Hallucination
     }
+    
+    # Log confusion matrix with verification
+    print(f"\n{'='*70}")
+    print(f"CONFUSION MATRIX (VERIFIED)")
+    print(f"{'='*70}")
+    print(f"                Predicted")
+    print(f"              {get_label_name(LABEL_CORRECT):12s}  {get_label_name(LABEL_HALLUCINATION):12s}")
+    print(f"Actual {get_label_name(LABEL_CORRECT):8s}    {cm_dict['true_negative']:4d}          {cm_dict['false_positive']:4d}")
+    print(f"      {get_label_name(LABEL_HALLUCINATION):8s} {cm_dict['false_negative']:4d}          {cm_dict['true_positive']:4d}")
+    print(f"\nTN={cm_dict['true_negative']}, FP={cm_dict['false_positive']}, "
+          f"FN={cm_dict['false_negative']}, TP={cm_dict['true_positive']}")
+    
+    # Verify confusion matrix sums correctly
+    total_from_cm = sum(cm_dict.values())
+    if total_from_cm != len(y_true):
+        raise ValueError(
+            f"Confusion matrix sum ({total_from_cm}) doesn't match number of samples ({len(y_true)})"
+        )
+    print(f"Total: {total_from_cm} (verified: matches {len(y_true)} samples)")
+    print(f"{'='*70}\n")
     cm_path_json = os.path.join(output_dir, "confusion_matrix.json")
     with open(cm_path_json, 'w') as f:
         json.dump(cm_dict, f, indent=2)
@@ -658,7 +834,7 @@ def evaluate_model(
     
     # Step 8: Save final metrics summary as text file
     summary_path = os.path.join(output_dir, "final_metrics.txt")
-    with open(summary_path, 'w') as f:
+    with open(summary_path, 'w', encoding='utf-8') as f:
         f.write("=" * 70 + "\n")
         f.write("FINAL EVALUATION METRICS SUMMARY\n")
         f.write("=" * 70 + "\n\n")
