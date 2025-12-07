@@ -1,278 +1,125 @@
-# System Architecture Documentation
+# System Architecture - Research Paper Diagrams
 
-## Overview
+## Figure 1: High-Level System Architecture
 
-The Hybrid Hallucination Detection System is a multi-component architecture that combines transformer models, entity verification, and agentic verification to detect hallucinations in LLM outputs.
-
-## Architecture Diagrams
-
-### 1. High-Level System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                  Hybrid Hallucination Detection System              │
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │                    Input Layer                                │  │
-│  │  ┌────────────────────────────────────────────────────────┐  │  │
-│  │  │  LLM Response Text                                      │  │  │
-│  │  │  (Prompt + Generated Response)                         │  │  │
-│  │  └────────────────────────────────────────────────────────┘  │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                              │                                      │
-│                              ▼                                      │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              Detection Components Layer                       │  │
-│  │                                                               │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │  │
-│  │  │ Transformer  │  │   Entity     │  │   Agentic    │      │  │
-│  │  │   Model      │  │ Verification │  │ Verification │      │  │
-│  │  │              │  │              │  │              │      │  │
-│  │  │ DistilBERT   │  │ NER + Wiki    │  │ LLM Cross-  │      │  │
-│  │  │ Classifier   │  │ Fact-Check    │  │ Check        │      │  │
-│  │  │              │  │              │  │              │      │  │
-│  │  │ Output:      │  │ Output:       │  │ Output:      │      │  │
-│  │  │ Prob [0-1]   │  │ Score [0-1]  │  │ Score [0-1] │      │  │
-│  │  └──────────────┘  └──────────────┘  └──────────────┘      │  │
-│  │       │                  │                    │              │  │
-│  └───────┼──────────────────┼────────────────────┼──────────────┘  │
-│          │                  │                    │                 │
-│          └──────────────────┼────────────────────┘                 │
-│                             │                                      │
-│                             ▼                                      │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              Fusion Layer                                      │  │
-│  │                                                               │  │
-│  │  ┌──────────────────────────────────────────────────────┐   │  │
-│  │  │  Hybrid Fusion Algorithm                              │   │  │
-│  │  │                                                       │   │  │
-│  │  │  Score = α×Trans + β×(1-Fact) + γ×(1-Agent)          │   │  │
-│  │  │                                                       │   │  │
-│  │  │  Where: α=0.7, β=0.2, γ=0.1                          │   │  │
-│  │  └──────────────────────────────────────────────────────┘   │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                             │                                      │
-│                             ▼                                      │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │                    Output Layer                                │  │
-│  │  ┌────────────────────────────────────────────────────────┐  │  │
-│  │  │  Final Prediction:                                      │  │  │
-│  │  │  • Hallucination Probability [0-1]                     │  │  │
-│  │  │  • Binary Classification (Hallucination/Correct)       │  │  │
-│  │  │  • Confidence Score                                     │  │  │
-│  │  │  • Detailed Metrics                                     │  │  │
-│  │  └────────────────────────────────────────────────────────┘  │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    Start([LLM Response R]) --> Tokenizer[Tokenization]
+    
+    Tokenizer --> Transformer[Transformer Classifier<br/>DistilBERT]
+    Tokenizer --> EntityExt[Entity Extractor<br/>NER]
+    Tokenizer --> Agentic[Agentic Verifier<br/>LLM Cross-Check]
+    Tokenizer --> Uncertainty[Uncertainty Scorer<br/>MC Dropout/Ensemble]
+    
+    Transformer --> PTrans[P_trans H|R<br/>Classification Score]
+    
+    EntityExt --> EntityVer[Wikipedia Verification]
+    EntityVer --> E[E<br/>Factual Score]
+    
+    Agentic --> A[A<br/>Verification Score]
+    
+    Uncertainty --> UEpistemic[U_epistemic<br/>Model Uncertainty]
+    Uncertainty --> UAleatoric[U_aleatoric<br/>Data Uncertainty]
+    UEpistemic --> UTotal[U_total<br/>Total Uncertainty]
+    UAleatoric --> UTotal
+    UTotal --> PUncertainty[P_uncertainty<br/>Uncertainty Score]
+    
+    PTrans --> SHDS[SHDS Calculator<br/>Novel Metric]
+    E --> SHDS
+    A --> SHDS
+    PUncertainty --> SHDS
+    SHDS --> SHDSScore[SHDS Score<br/>Multi-dimensional]
+    
+    PTrans --> Fusion[Fusion Engine]
+    E --> Fusion
+    A --> Fusion
+    PUncertainty --> Fusion
+    SHDSScore --> Fusion
+    
+    Fusion --> ClassicFusion[Classic Fusion<br/>H = α·P_trans + β·1-E + γ·1-A + δ·SHDS]
+    Fusion --> DMSF[DMSF<br/>Dynamic Multi-Signal Fusion<br/>Adaptive Weights]
+    
+    ClassicFusion --> FinalScore[Final Score H]
+    DMSF --> FinalScore
+    
+    FinalScore --> Classifier{Classification<br/>H ≥ threshold?}
+    Classifier -->|Yes| Hallucination[Hallucination]
+    Classifier -->|No| Correct[Correct]
+    
+    style Start fill:#e1f5ff
+    style Transformer fill:#fff4e6
+    style EntityExt fill:#fff4e6
+    style Agentic fill:#fff4e6
+    style Uncertainty fill:#fff4e6
+    style SHDS fill:#ffe6f2
+    style Fusion fill:#e6ffe6
+    style DMSF fill:#ffe6f2
+    style FinalScore fill:#e1f5ff
+    style Hallucination fill:#ffcccc
+    style Correct fill:#ccffcc
 ```
 
-### 2. Data Flow Diagram
+## Figure 2: Dynamic Multi-Signal Fusion (DMSF) Process
 
-```
-┌─────────────┐
-│ Raw Dataset │
-│ (HaluEval)  │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────┐
-│  Preprocessing  │
-│  • Extract pairs│
-│  • Encode labels│
-│  • Tokenize     │
-└──────┬──────────┘
-       │
-       ▼
-┌─────────────────┐
-│ Training Data   │
-│ (Train/Val/Test)│
-└──────┬──────────┘
-       │
-       ▼
-┌─────────────────┐      ┌──────────────────┐
-│ Model Training   │─────▶│ Trained Model   │
-│ • DistilBERT     │      │ (Saved)         │
-│ • Fine-tuning    │      └──────────────────┘
-└─────────────────┘
-       │
-       ▼
-┌─────────────────┐
-│  Test Data      │
-└──────┬──────────┘
-       │
-       ├──────────────────┬──────────────────┐
-       ▼                  ▼                  ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│ Transformer  │  │   Entity     │  │   Agentic    │
-│ Prediction   │  │ Verification  │  │ Verification  │
-└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
-       │                 │                  │
-       └─────────────────┼──────────────────┘
-                         │
-                         ▼
-                  ┌──────────────┐
-                  │   Fusion     │
-                  │   Algorithm  │
-                  └──────┬───────┘
-                         │
-                         ▼
-                  ┌──────────────┐
-                  │  Evaluation  │
-                  │  & Metrics   │
-                  └──────┬───────┘
-                         │
-                         ▼
-                  ┌──────────────┐
-                  │  Results     │
-                  │  (JSON/PNG)  │
-                  └──────────────┘
+```mermaid
+flowchart TD
+    Start[Input Signals<br/>C, E, A, SHDS] --> Agreement[Compute Signal Agreement<br/>Agreement = 1 - Var C, 1-E, 1-A, SHDS]
+    
+    Start --> Uncertainty[Compute Uncertainty<br/>U_total = U_epistemic + U_aleatoric]
+    
+    Start --> EntityMismatch[Detect Entity Mismatch<br/>EMP = failed / total]
+    
+    Agreement --> Decision1{High<br/>Disagreement?}
+    Agreement --> Decision2{High<br/>Agreement?}
+    
+    Uncertainty --> Decision3{High<br/>Uncertainty?}
+    
+    EntityMismatch --> Decision4{Strong<br/>Mismatch?}
+    
+    Decision1 -->|Yes| Adjust1[↑ SHDS Weight<br/>δ' = δ· 1+disagreement]
+    Decision2 -->|Yes| Adjust2[↓ SHDS Weight<br/>δ' = δ· 1-agreement]
+    Decision3 -->|Yes| Adjust3[↑ Agent + SHDS<br/>γ' = γ· 1+uncertainty<br/>δ' = δ· 1+uncertainty]
+    Decision4 -->|Yes| Adjust4[↑ Entity Weight<br/>β' = β· 1+EMP]
+    
+    Adjust1 --> Fusion[DMSF Fusion<br/>H = α'·C + β'· 1-E<br/>+ γ'· 1-A + δ'·SHDS<br/>+ DynamicBias]
+    Adjust2 --> Fusion
+    Adjust3 --> Fusion
+    Adjust4 --> Fusion
+    
+    Decision1 -->|No| Fusion
+    Decision2 -->|No| Fusion
+    Decision3 -->|No| Fusion
+    Decision4 -->|No| Fusion
+    
+    Fusion --> Output[Final Score H]
+    
+    style Start fill:#e1f5ff
+    style Agreement fill:#fff4e6
+    style Uncertainty fill:#fff4e6
+    style EntityMismatch fill:#fff4e6
+    style Fusion fill:#ffe6f2
+    style Output fill:#ccffcc
 ```
 
-### 3. Component Interaction Diagram
+## Mathematical Formulations
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Master Pipeline                           │
-└─────────────────────────────────────────────────────────────┘
-                            │
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-        ▼                   ▼                   ▼
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│ Data Loader  │   │   Trainer    │   │  Evaluator   │
-│              │   │              │   │              │
-│ • Load JSON  │   │ • Initialize │   │ • Metrics    │
-│ • Split Data │   │ • Train      │   │ • Plots      │
-│ • Create DL  │   │ • Validate    │   │ • Reports    │
-└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
-       │                  │                  │
-       └──────────────────┼──────────────────┘
-                          │
-                          ▼
-              ┌───────────────────────┐
-              │  Verification Layer  │
-              │                      │
-              │  ┌────────────────┐  │
-              │  │ Entity Verifier│  │
-              │  │ • NER Extract  │  │
-              │  │ • Wiki Check   │  │
-              │  └────────────────┘  │
-              │                      │
-              │  ┌────────────────┐  │
-              │  │ Agentic Verif. │  │
-              │  │ • LLM Check    │  │
-              │  └────────────────┘  │
-              └──────────┬───────────┘
-                         │
-                         ▼
-              ┌───────────────────────┐
-              │   Fusion Engine       │
-              │   • Weighted Sum      │
-              │   • Classification    │
-              └───────────────────────┘
-```
+### Classic Fusion
+$$H = \alpha \cdot P_{trans} + \beta \cdot (1-E) + \gamma \cdot (1-A) + \delta \cdot SHDS$$
 
-### 4. Training Pipeline
+where $\alpha + \beta + \gamma + \delta = 1$.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Training Pipeline                         │
-└─────────────────────────────────────────────────────────────┘
+### DMSF Dynamic Weight Adjustment
+$$\text{Agreement} = 1 - \text{Var}[\{P_{trans}, 1-E, 1-A, SHDS\}]$$
 
-Epoch Loop (N epochs)
-│
-├─▶ Training Phase
-│   │
-│   ├─ For each batch:
-│   │   ├─ Forward pass
-│   │   ├─ Compute loss
-│   │   ├─ Backward pass
-│   │   └─ Update weights
-│   │
-│   └─ Calculate training metrics
-│
-├─▶ Validation Phase
-│   │
-│   ├─ For each batch:
-│   │   ├─ Forward pass (no grad)
-│   │   └─ Compute metrics
-│   │
-│   └─ Calculate validation metrics
-│
-└─▶ Save best model
-    │
-    └─▶ Generate plots
-```
+$$H_{DMSF} = \alpha' \cdot P_{trans} + \beta' \cdot (1-E) + \gamma' \cdot (1-A) + \delta' \cdot SHDS + \text{DynamicBias}$$
 
-## Component Details
+where weights are dynamically adjusted based on signal agreement, uncertainty, and entity mismatch.
 
-### Transformer Model Component
+### SHDS Calculation
+$$SHDS = w_1 \cdot ED + w_2 \cdot EMP + w_3 \cdot RI + w_4 \cdot TU$$
 
-- **Model**: DistilBERT-base-uncased
-- **Task**: Binary classification (Hallucination vs Correct)
-- **Input**: Tokenized prompt-response pairs
-- **Output**: Hallucination probability [0-1]
-- **Training**: Fine-tuning with AdamW optimizer
-
-### Entity Verification Component
-
-- **Method 1**: spaCy NER (default)
-- **Method 2**: HuggingFace Transformers NER
-- **Verification**: Wikipedia API fact-checking
-- **Output**: Factual correctness score [0-1]
-
-### Agentic Verification Component
-
-- **Method 1**: Local LLM (transformers library)
-- **Method 2**: API-based (OpenAI/Anthropic)
-- **Process**: LLM cross-checks the response
-- **Output**: Verification score [0-1]
-
-### Fusion Component
-
-- **Algorithm**: Weighted linear combination
-- **Weights**: Configurable (default: α=0.7, β=0.2, γ=0.1)
-- **Threshold**: Configurable (default: 0.5)
-- **Output**: Final hallucination probability + binary classification
-
-## Data Formats
-
-### Input Format
-
-```json
-{
-  "response": "LLM generated response text",
-  "prompt": "Original prompt (optional)",
-  "label": 0 or 1  // 0=correct, 1=hallucination
-}
-```
-
-### Output Format
-
-```json
-{
-  "transformer_prob": 0.3,
-  "factual_score": 0.9,
-  "agentic_score": 0.85,
-  "fusion_prob": 0.25,
-  "is_hallucination": false,
-  "confidence": 0.92
-}
-```
-
-## Performance Metrics
-
-- **Accuracy**: Overall correctness
-- **Precision**: True positives / (True positives + False positives)
-- **Recall**: True positives / (True positives + False negatives)
-- **F1-Score**: Harmonic mean of precision and recall
-- **AUC-ROC**: Area under ROC curve
-
-## Scalability Considerations
-
-- Batch processing support
-- GPU acceleration (if available)
-- API rate limiting for external services
-- Caching for repeated verifications
-- Efficient data loading with DataLoaders
-
+where:
+- $ED$ = Embedding Divergence
+- $EMP$ = Entity Mismatch Penalty
+- $RI$ = Reasoning Inconsistency
+- $TU$ = Token Uncertainty
